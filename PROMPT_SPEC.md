@@ -55,3 +55,7 @@ Rules for the generation prompt:
 - gain 0-1, default 0.7
 
 Why manifest instead of audio elements: the render scrubs the frozen CSS clock at render speed (not real time), so live audio can never stay in sync. Declared events are synthesized app-side and muxed on the same master frame clock - sample-accurate, offline, deterministic, no audio files in the HTML.
+
+## Generation prompt
+
+The versioned generation prompt lives in `GENERATION_PROMPT.md` - it matches this app build exactly: the #sfx sound contract, full-window .fit (LOCKED +-0px path), camera moves / parallax / odometer / clip-path wipes in the motion grammar, and a RECORD NOTE with no screen-record fallback. Use it as the single prompt pasted alongside the SRT.
