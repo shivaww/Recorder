@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<title>BrollRender fixture 2 - sound + picture</title>
+<style>
+/* FIXTURE 2 - 60s, 6 shots, ZERO JS logic. Exercises the GENERATION_PROMPT
+   stack: full-window .fit (LOCKED +-0px), camera push, parallax, odometer,
+   clip-path wipe, flip-card, and the MEGA-SLAM CHOREOGRAPHY at t=16.2s:
+   kinetic word + double ring + 66ms white flash + chromatic ghosts, with
+   rise@15.4 -> slam@16.2 sound binding. Self-verifying: 60s linear pbar
+   (fill == elapsed/60), chrome hidden by the cdp rule, bottom 25% empty. */
+:root{
+  --void:#0A0C10; --line:#232833; --ink:#F2F4F8;
+  --muted:#8A93A6; --acc:#FFB454; --acc2:#7CE0C3;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden;background:var(--void)}
+body{display:flex;align-items:center;justify-content:center;
+     font-family:'IBM Plex Mono',monospace;color:var(--ink)}
+.fit{aspect-ratio:16/9;container-type:size;overflow:hidden;
+     width:100vw;max-width:calc(100vh*16/9);margin:0 auto;
+     position:relative;background:var(--void)}
+.stage{position:absolute;inset:0;animation:cam 60s ease-in-out both}
+.safe{position:absolute;inset:0 0 25% 0}
+/* ---- ambient floor + parallax (different drift rates per plane) ---- */
+.grid{position:absolute;inset:0;opacity:0;
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),
+                   linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:14.2cqh 8cqh;animation:fade5 1.2s ease-out .1s both}
+.ticks{position:absolute;inset:2cqh;opacity:0;animation:fade1 1s ease-out .5s both}
+.ticks i{position:absolute;width:3cqh;height:3cqh;border:.3cqh solid var(--muted);opacity:.6}
+.ticks i:nth-child(1){top:0;left:0;border-right:0;border-bottom:0}
+.ticks i:nth-child(2){top:0;right:0;border-left:0;border-bottom:0}
+.ticks i:nth-child(3){bottom:0;left:0;border-right:0;border-top:0}
+.ticks i:nth-child(4){bottom:0;right:0;border-left:0;border-top:0}
+.orbit{position:absolute;left:50%;top:50%;width:56cqh;height:56cqh;
+       margin:-28cqh 0 0 -28cqh;border:.25cqh dashed var(--line);
+       border-radius:50%;animation:spin 40s linear infinite}
+.p{position:absolute;width:.7cqh;height:.7cqh;border-radius:50%;
+   background:var(--muted);opacity:.16;animation:drift 13s ease-in-out infinite alternate}
+.p1{left:12%;top:30%;animation-delay:-2s}
+.p2{left:70%;top:20%;animation-duration:9s;animation-delay:-4s}
+.p3{left:40%;top:62%;animation-duration:17s}
+.hud{position:absolute;left:3cqh;top:3.4cqh;font-size:1.6cqh;
+     letter-spacing:.3cqh;color:var(--muted);opacity:0;
+     animation:fade1 1s ease-out .8s both,drift2 21s ease-in-out infinite alternate}
+.pbar{position:absolute;left:0;top:0;height:.9cqh;width:0;background:var(--acc);
+      opacity:.9;animation:fill60 60s linear both}
+/* ---- shots ---- */
+.shot{position:absolute;inset:0;display:flex;flex-direction:column;
+      align-items:center;justify-content:center;gap:3cqh;opacity:0;
+  animation-name:shotIn,shotOut;animation-duration:.8s,.9s;
+  animation-timing-function:cubic-bezier(.16,.9,.26,1),ease-in;
+  animation-fill-mode:both,both}
+.s1{animation-delay:.05s,9.1s}
+.s2{animation-delay:10.05s,19.1s}
+.s3{animation-delay:20.05s,29.1s}
+.s4{animation-delay:30.05s,39.1s}
+.s5{animation-delay:40.05s,49.1s}
+.s6{animation-delay:50.05s,59s;animation-duration:.8s,1s}
+/* ---- typography ---- */
+.big{font-family:Anton,sans-serif;font-size:13cqh;letter-spacing:.6cqh;text-align:center}
+.a{color:var(--acc)}
+.lbl{font-size:1.9cqh;letter-spacing:.4cqh;color:var(--muted)}
+/* ---- entrances ---- */
+.slamin{animation:slam .55s cubic-bezier(.2,1.35,.35,1) both}
+.risein{animation:rise .7s cubic-bezier(.16,.9,.26,1) both}
+.rule{width:38cqh;height:.6cqh;background:var(--acc);transform:scaleX(0);
+      transform-origin:left;animation:grow .9s cubic-bezier(.45,.05,.4,1) both}
+/* ---- MEGA-SLAM STACK @16.2: word + double ring + flash + ghosts ---- */
+.megawrap{position:relative;padding:2cqh;display:flex;align-items:center;justify-content:center}
+.ring{position:absolute;left:50%;top:50%;width:30cqh;height:30cqh;
+      margin:-15cqh 0 0 -15cqh;border:.5cqh solid var(--acc);border-radius:50%;
+      animation:burst .8s cubic-bezier(.16,.9,.26,1) both}
+.ring2{border-color:var(--acc2);width:22cqh;height:22cqh;margin:-11cqh 0 0 -11cqh}
+.megaTxt{position:relative;font-family:Anton,sans-serif;font-size:15cqh;color:var(--acc)}
+.ghost{position:absolute;font-family:Anton,sans-serif;font-size:15cqh;color:var(--acc2);
+       opacity:0;animation:ghostk .12s linear both}
+.gA{transform:translate(-.6cqh,-.4cqh)}
+.gB{transform:translate(.6cqh,.4cqh)}
+.flash{position:absolute;inset:0;background:var(--ink);opacity:0;
+       animation:flashk .066s linear both}
+/* ---- odometer ---- */
+.odo{height:12cqh;overflow:hidden;display:flex;justify-content:center}
+.ocol{display:flex;flex-direction:column;font-family:Anton,sans-serif;
+      font-size:10cqh;color:var(--ink);line-height:12cqh;text-align:center;
+      animation:roll 1.4s cubic-bezier(.16,.9,.26,1) both}
+/* ---- clip-path wipe panel ---- */
+.wpanel{display:flex;flex-direction:column;align-items:center;gap:2cqh;
+        border:.3cqh solid var(--line);padding:3cqh 5cqh;
+        clip-path:inset(0 100% 0 0);animation:wipe .9s cubic-bezier(.45,.05,.4,1) both}
+.meter{width:34cqh;height:1.5cqh;background:var(--acc);opacity:.85;
+       transform:scaleX(0);transform-origin:left;
+       animation:grow .9s cubic-bezier(.45,.05,.4,1) both}
+.m2{width:26cqh;background:var(--acc2)}
+.m3{width:19cqh;background:var(--muted)}
+/* ---- bars / needle / flip / strike / wave ---- */
+.bars{display:flex;gap:2.2cqh;align-items:flex-end;height:20cqh}
+.bar{width:4cqh;background:var(--line);transform:scaleY(0);transform-origin:bottom;
+     animation:risebar .8s cubic-bezier(.16,.9,.26,1) both}
+.needle{width:.5cqh;height:12cqh;background:var(--acc);transform:rotate(-70deg);
+        transform-origin:bottom;animation:sweep 1.2s cubic-bezier(.2,1.35,.35,1) both}
+.fcard{font-family:Anton,sans-serif;font-size:9cqh;color:var(--void);
+       background:var(--acc);padding:1.5cqh 4cqh;letter-spacing:.3cqh;
+       animation:flip .8s cubic-bezier(.16,.9,.26,1) both}
+.tags{display:flex;gap:3cqh}
+.tag{font-family:Anton,sans-serif;font-size:3.6cqh;letter-spacing:.2cqh;
+     color:var(--void);background:var(--acc);padding:.7cqh 1.8cqh;
+     animation:stamp .5s cubic-bezier(.2,1.35,.35,1) both}
+.word{position:relative;font-family:Anton,sans-serif;font-size:9cqh;color:var(--ink)}
+.slash{position:absolute;left:-4%;top:52%;width:108%;height:.9cqh;
+       background:var(--acc2);transform:rotate(-5deg) scaleX(0);transform-origin:left;
+       animation:slashk .45s cubic-bezier(.45,.05,.4,1) both}
+.gonew{color:var(--acc2);font-size:11cqh}
+.wave{display:flex;gap:1cqh;align-items:center;height:8cqh}
+.wv{width:1.1cqh;height:3cqh;background:var(--muted);opacity:.4;
+    animation:pulse 1.7s ease-in-out infinite alternate}
+.wv:nth-child(2n){animation-duration:1.3s}
+.wv:nth-child(3n){animation-duration:2.2s}
+/* ---- browser-only chrome (must vanish under headless) ---- */
+.guides{position:absolute;inset:1.5cqh;pointer-events:none}
+.guides i{position:absolute;width:6cqh;height:6cqh;border:.5cqh solid var(--acc)}
+.guides i:nth-child(1){top:0;left:0;border-right:0;border-bottom:0}
+.guides i:nth-child(2){top:0;right:0;border-left:0;border-bottom:0}
+.guides i:nth-child(3){bottom:0;left:0;border-right:0;border-top:0}
+.guides i:nth-child(4){bottom:0;right:0;border-left:0;border-top:0}
+.vtag{position:absolute;right:2.2cqh;bottom:1.8cqh;font-size:1.7cqh;
+      letter-spacing:.3cqh;color:var(--muted)}
+body.cdp .guides,body.cdp .vtag{display:none!important}
+/* ---- keyframes ---- */
+@keyframes fade5{to{opacity:.5}}
+@keyframes fade1{to{opacity:1}}
+@keyframes drift{to{transform:translate(3cqh,-2cqh)}}
+@keyframes drift2{to{transform:translate(.8cqh,-.5cqh)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes cam{to{transform:scale(1.045)}}
+@keyframes fill60{to{width:100%}}
+@keyframes shotIn{from{opacity:0}to{opacity:1}}
+@keyframes shotOut{to{opacity:0}}
+@keyframes slam{from{opacity:0;transform:scale(1.7)}to{opacity:1;transform:scale(1)}}
+@keyframes rise{from{opacity:0;transform:translateY(3cqh)}to{opacity:1;transform:none}}
+@keyframes grow{to{transform:scaleX(1)}}
+@keyframes burst{from{opacity:.9;transform:scale(.2)}to{opacity:0;transform:scale(1)}}
+@keyframes ghostk{0%{opacity:0}60%{opacity:.4}100%{opacity:0}}
+@keyframes flashk{0%{opacity:0}50%{opacity:1}100%{opacity:0}}
+@keyframes roll{to{transform:translateY(-84cqh)}}
+@keyframes wipe{to{clip-path:inset(0 0 0 0)}}
+@keyframes risebar{to{transform:scaleY(1)}}
+@keyframes sweep{to{transform:rotate(55deg)}}
+@keyframes flip{from{transform:perspective(90cqh) rotateY(88deg);opacity:0}
+                to{transform:perspective(90cqh) rotateY(0);opacity:1}}
+@keyframes stamp{from{opacity:0;transform:scale(1.7) rotate(-9deg)}
+                 to{opacity:1;transform:scale(1) rotate(-3deg)}}
+@keyframes slashk{to{transform:rotate(-5deg) scaleX(1)}}
+@keyframes pulse{to{height:7cqh;opacity:.75}}
+</style>
+</head>
+<body>
+<div class="fit" id="video-frame">
+  <div class="pbar"></div>
+  <div class="stage">
+    <div class="grid"></div>
+    <div class="orbit"></div>
+    <div class="ticks"><i></i><i></i><i></i><i></i></div>
+    <div class="p p1"></div><div class="p p2"></div><div class="p p3"></div>
+    <div class="flash" style="animation-delay:16.2s"></div>
+    <div class="safe">
+      <section class="shot s1">
+        <div class="big slamin" style="animation-delay:.5s">SFX<span class="a">+</span>PICTURE</div>
+        <div class="rule" style="animation-delay:1.8s"></div>
+        <div class="lbl risein" style="animation-delay:2.6s">FIXTURE 2 · 60 SECONDS · ZERO JS</div>
+      </section>
+      <section class="shot s2">
+        <div class="lbl risein" style="animation-delay:10.4s">ODOMETER</div>
+        <div class="odo"><div class="ocol" style="animation-delay:11.2s">
+          <span>0</span><span>1</span><span>2</span><span>3</span>
+          <span>4</span><span>5</span><span>6</span><span>7</span>
+        </div></div>
+        <div class="megawrap">
+          <div class="ring" style="animation-delay:16.2s"></div>
+          <div class="ring ring2" style="animation-delay:16.28s"></div>
+          <span class="ghost gA" style="animation-delay:16.2s">PROOF?</span>
+          <span class="ghost gB" style="animation-delay:16.2s">PROOF?</span>
+          <span class="megaTxt slamin" style="animation-delay:16.2s">PROOF?</span>
+        </div>
+        <div class="lbl risein" style="animation-delay:17.5s">MEGA-SLAM · T=16.2S · FLASH+RINGS+GHOSTS</div>
+      </section>
+      <section class="shot s3">
+        <div class="wpanel" style="animation-delay:20.8s">
+          <div class="lbl">MIX CHECK</div>
+          <div class="meter" style="animation-delay:21.4s"></div>
+          <div class="meter m2" style="animation-delay:21.6s"></div>
+          <div class="meter m3" style="animation-delay:21.8s"></div>
+        </div>
+        <div class="word risein" style="animation-delay:24.6s">BLUR<span class="slash" style="animation-delay:25.8s"></span></div>
+        <div class="word slamin gonew" style="animation-delay:26.9s">GONE.</div>
+      </section>
+      <section class="shot s4">
+        <div class="bars">
+          <div class="bar" style="animation-delay:30.4s;height:9cqh"></div>
+          <div class="bar" style="animation-delay:30.55s;height:14cqh"></div>
+          <div class="bar" style="animation-delay:30.7s;height:11cqh"></div>
+          <div class="bar" style="animation-delay:30.85s;height:18cqh"></div>
+          <div class="bar" style="animation-delay:31s;height:7cqh"></div>
+        </div>
+        <div class="needle" style="animation-delay:33.8s"></div>
+        <div class="lbl risein" style="animation-delay:34.8s">FRAME-EXACT TIMELINE</div>
+      </section>
+      <section class="shot s5">
+        <div class="fcard" style="animation-delay:40.6s">1080P30</div>
+        <div class="tags">
+          <div class="tag" style="animation-delay:42.4s">SYNC</div>
+          <div class="tag" style="animation-delay:43.7s">LOCKED</div>
+        </div>
+        <div class="lbl risein" style="animation-delay:45.2s">FLIP-CARD + STAMPS</div>
+      </section>
+      <section class="shot s6">
+        <div class="wave">
+          <div class="wv"></div><div class="wv"></div><div class="wv"></div>
+          <div class="wv"></div><div class="wv"></div><div class="wv"></div>
+          <div class="wv"></div><div class="wv"></div><div class="wv"></div>
+        </div>
+        <div class="big risein" style="animation-delay:51.5s">END<span class="a">.</span></div>
+        <div class="lbl risein" style="animation-delay:53.2s">SOUND + PICTURE · SETTLES AT 60S</div>
+      </section>
+    </div>
+  </div>
+  <div class="guides"><i></i><i></i><i></i><i></i></div>
+  <div class="vtag">T60 · MEGA@16.2S · FIXTURE 2</div>
+</div>
+<script type="application/json" id="sfx">
+[
+  {"t": 0.5,   "id": "whoosh", "gain": 0.6},
+  {"t": 10.4,  "id": "whoosh", "gain": 0.6},
+  {"t": 11.2,  "id": "tick",   "gain": 0.5},
+  {"t": 15.4,  "id": "rise",   "gain": 0.55},
+  {"t": 16.2,  "id": "slam",   "gain": 0.9},
+  {"t": 17.5,  "id": "ding",   "gain": 0.5},
+  {"t": 20.4,  "id": "whoosh", "gain": 0.6},
+  {"t": 25.8,  "id": "glitch", "gain": 0.6},
+  {"t": 26.9,  "id": "slam",   "gain": 0.7},
+  {"t": 30.4,  "id": "whoosh", "gain": 0.6},
+  {"t": 31.0,  "id": "pop",    "gain": 0.5},
+  {"t": 40.5,  "id": "whoosh", "gain": 0.6},
+  {"t": 42.0,  "id": "ding",   "gain": 0.5},
+  {"t": 50.05, "id": "whoosh", "gain": 0.6},
+  {"t": 53.2,  "id": "ding",   "gain": 0.45}
+]
+</script>
+</body>
+</html>
