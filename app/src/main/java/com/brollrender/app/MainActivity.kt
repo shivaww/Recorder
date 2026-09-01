@@ -544,7 +544,7 @@ class MainActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         showRenderScreen(durationSec)
         renderThread = Thread {
-            val outcome = runRenderJob(p, durationSec)
+            val outcome = runRenderJob(p, durationSec, zoom)
             rendering = false
             runOnUiThread {
                 window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -620,7 +620,8 @@ class MainActivity : Activity() {
 
     private fun runRenderJob(
         p: RenderEngine.PrepareResult.Ok,
-        durationSec: Int
+        durationSec: Int,
+        zoom: ZoomTransform?
     ): RenderEngine.RenderOutcome {
         val total = durationSec * fps
         // Section 6 baseline (16 Mbps final / 8 Mbps draft) is now the default
