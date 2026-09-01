@@ -6,10 +6,12 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
+import android.graphics.RectF
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -21,12 +23,18 @@ data class ZoomTransform(
 )
 
 /**
- * Interactive manual framing for the PREVIEW screen. The view's bounds ARE
- * the output frame (16:9): what is visible inside the amber brackets is
- * exactly what gets recorded - the same translate/scale is injected into
- * the WebView as a CSS transform on <html>, so the page re-rasterizes at
- * the zoomed size (crisp text/vectors; never a bitmap upscale of the
- * capture). Pinch to zoom (0.5x-4x), drag to pan, double-tap to reset.
+ * Interactive manual framing for the PREVIEW screen.
+ *
+ * Two editing modes:
+ *  - PINCH: pinch 0.5x-4x + drag pan + double-tap reset.
+ *  - CROP: gallery/editor-style - four draggable corner handles + move-rect
+ *    over the base (unscaled) page, rule-of-thirds grid, dimmed scrim
+ *    outside the rect; APPLY maps the 16:9 crop to the full output frame.
+ *
+ * The committed transform is injected into the WebView as a CSS transform
+ * on <html> at render time: zoomed content re-rasterizes (crisp text and
+ * vectors, NEVER a bitmap upscale of the capture - rule 2 intact). No screen
+ * recording anywhere - the render path is unchanged.
  *
  * The preview bitmap is a 480x270 approximation; the render is exact.
  */
@@ -38,13 +46,22 @@ class ZoomView(
 ) : View(context) {
 
     var onTransform: ((ZoomTransform) -> Unit)? = null
+    var onModeChange: ((cropEditing: Boolean) -> Unit)? = null
 
     private var scale = initial?.scale ?: 1f
     private var panX = 0f // view px
     private var panY = 0f
 
+    // CROP-mode state (rect in view px, always kept 16:9).
+    private var cropMode = false
+    private val crop = RectF()
+    private var dragMode = -1 // -1 none, -2 move rect, 0..3 corner index
+    private var moveDx = 0f
+    private var moveDy = 0f
+
     private val voidPaint = Paint().apply { color = 0xFF0A0C10.toInt() }
     private val imgPaint = Paint().apply { isFilterBitmap = true } // preview-only smoothing
+    private val scrimPaint = Paint().apply { color = 0x88000000 }
     private val outlinePaint = Paint().apply {
         color = 0x99FFB454.toInt()
         style = Paint.Style.STROKE
@@ -56,6 +73,15 @@ class ZoomView(
         strokeWidth = 3f
         strokeCap = Paint.Cap.ROUND
     }
+    private val handlePaint = Paint().apply {
+        color = 0xFFFFB454.toInt()
+        style = Paint.Style.FILL
+    }
+    private val handleStrokePaint = Paint().apply {
+        color = 0xFF0A0C10.toInt()
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+    }
 
     fun transform(): ZoomTransform = ZoomTransform(
         scale,
@@ -63,12 +89,58 @@ class ZoomView(
         if (height > 0) panY / height else 0f
     )
 
-    fun reset() {
+    /** FULL preset: whole page, scale 1, no pan. */
+    fun resetFull() {
         scale = 1f
         panX = 0f
         panY = 0f
+        exitCrop()
+        clampPan()
         invalidate()
         onTransform?.invoke(transform())
+    }
+
+    /** CENTER preset: keep the current zoom, center the content. */
+    fun centerContent() {
+        if (width > 0 && height > 0) {
+            panX = (width - width * scale) / 2f
+            panY = (height - height * scale) / 2f
+        }
+        exitCrop()
+        clampPan()
+        invalidate()
+        onTransform?.invoke(transform())
+    }
+
+    fun enterCrop() {
+        if (width == 0 || height == 0) return
+        cropMode = true
+        val ix = width * 0.05f
+        val iy = height * 0.05f
+        crop.set(ix, iy, width - ix, height - iy) // proportional inset keeps 16:9
+        dragMode = -1
+        invalidate()
+        onModeChange?.invoke(true)
+    }
+
+    fun applyCrop() {
+        if (!cropMode || width == 0) return
+        val s = width / crop.width()
+        scale = s
+        panX = -crop.left * s
+        panY = -crop.top * s
+        exitCrop()
+        clampPan()
+        invalidate()
+        onTransform?.invoke(transform())
+    }
+
+    private fun exitCrop() {
+        if (cropMode) {
+            cropMode = false
+            dragMode = -1
+            onModeChange?.invoke(false)
+        }
     }
 
     private fun clampPan() {
@@ -87,6 +159,7 @@ class ZoomView(
                 dx: Float,
                 dy: Float
             ): Boolean {
+                if (cropMode) return false
                 panX -= dx
                 panY -= dy
                 clampPan()
@@ -96,7 +169,7 @@ class ZoomView(
             }
 
             override fun onDoubleTap(e: MotionEvent): Boolean {
-                reset()
+                resetFull()
                 return true
             }
         })
@@ -105,6 +178,7 @@ class ZoomView(
         context,
         object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(detector: ScaleGestureDetector): Boolean {
+                if (cropMode) return false
                 val fx = detector.focusX
                 val fy = detector.focusY
                 val newScale = (scale * detector.scaleFactor).coerceIn(0.5f, 4f)
@@ -122,22 +196,129 @@ class ZoomView(
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (cropMode) {
+            handleCropTouch(e)
+            return true
+        }
         scaleDetector.onTouchEvent(e)
         panDetector.onTouchEvent(e)
         return true
     }
 
+    // ===================== CROP-mode touch + geometry =====================
+
+    private fun cornerAt(i: Int): Pair<Float, Float> = when (i) {
+        0 -> crop.left to crop.top
+        1 -> crop.right to crop.top
+        2 -> crop.right to crop.bottom
+        else -> crop.left to crop.bottom
+    }
+
+    private fun hitCorner(x: Float, y: Float): Int {
+        val r = 48f
+        for (i in 0..3) {
+            val (cx, cy) = cornerAt(i)
+            if (abs(x - cx) < r && abs(y - cy) < r) return i
+        }
+        return -1
+    }
+
+    private fun handleCropTouch(e: MotionEvent) {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                dragMode = hitCorner(e.x, e.y)
+                if (dragMode < 0 && crop.contains(e.x, e.y)) {
+                    dragMode = -2
+                    moveDx = e.x - crop.left
+                    moveDy = e.y - crop.top
+                }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                when (dragMode) {
+                    -2 -> {
+                        val nl = (e.x - moveDx).coerceIn(0f, width - crop.width())
+                        val nt = (e.y - moveDy).coerceIn(0f, height - crop.height())
+                        crop.offsetTo(nl, nt)
+                        invalidate()
+                    }
+                    0, 1, 2, 3 -> setCropFromPoint(e.x, e.y)
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> dragMode = -1
+        }
+    }
+
+    /** Move corner [dragMode] to (x, y); opposite corner pinned; stays 16:9. */
+    private fun setCropFromPoint(x: Float, y: Float) {
+        val (ox, oy) = when (dragMode) {
+            0 -> cornerAt(2) // drag TL, pin BR
+            1 -> cornerAt(3) // drag TR, pin BL
+            2 -> cornerAt(0) // drag BR, pin TL
+            else -> cornerAt(1) // drag BL, pin TR
+        }
+        val sx = if (x >= ox) 1f else -1f
+        val sy = if (y >= oy) 1f else -1f
+        val minH = height * 0.12f
+        var h = abs(y - oy).coerceAtLeast(minH)
+        var w = h * 16f / 9f
+        val maxByX = if (sx > 0) width - ox else ox
+        val maxByY = if (sy > 0) height - oy else oy
+        if (w > maxByX) {
+            w = maxByX
+            h = w * 9f / 16f
+        }
+        if (h > maxByY) {
+            h = maxByY
+            w = h * 16f / 9f
+        }
+        if (h < minH) {
+            h = minH
+            w = h * 16f / 9f
+        }
+        val l = if (sx > 0) ox else ox - w
+        val t = if (sy > 0) oy else oy - h
+        crop.set(l, t, l + w, t + h)
+        invalidate()
+    }
+
+    // ===================== measure / layout / draw =====================
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val w = MeasureSpec.getSize(widthMeasureSpec)
+        val w = View.MeasureSpec.getSize(widthMeasureSpec)
         setMeasuredDimension(w, (w * 9f / 16f).toInt())
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         clampPan()
+        if (cropMode) enterCrop() // re-fit the crop rect to the new size
     }
 
     override fun onDraw(c: Canvas) {
+        if (cropMode) {
+            c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), voidPaint)
+            c.drawBitmap(thumb, null, Rect(0, 0, width, height), imgPaint)
+            // Dim everything outside the crop rect (editor-style scrim).
+            c.drawRect(0f, 0f, width.toFloat(), crop.top, scrimPaint)
+            c.drawRect(0f, crop.bottom, width.toFloat(), height.toFloat(), scrimPaint)
+            c.drawRect(0f, crop.top, crop.left, crop.bottom, scrimPaint)
+            c.drawRect(crop.right, crop.top, width.toFloat(), crop.bottom, scrimPaint)
+            // Outline + rule-of-thirds grid.
+            c.drawRect(crop, outlinePaint)
+            for (i in 1..2) {
+                val gx = crop.left + crop.width() * i / 3f
+                val gy = crop.top + crop.height() * i / 3f
+                c.drawLine(gx, crop.top, gx, crop.bottom, outlinePaint)
+                c.drawLine(crop.left, gy, crop.right, gy, outlinePaint)
+            }
+            // Corner handles.
+            for (i in 0..3) {
+                val (cx, cy) = cornerAt(i)
+                c.drawCircle(cx, cy, 16f, handlePaint)
+                c.drawCircle(cx, cy, 16f, handleStrokePaint)
+            }
+            return
+        }
         c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), voidPaint)
         c.save()
         c.translate(panX, panY)

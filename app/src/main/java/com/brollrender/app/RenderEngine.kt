@@ -3,6 +3,8 @@ package com.brollrender.app
 import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.Rect
 import android.widget.FrameLayout
@@ -289,6 +291,7 @@ class RenderEngine(private val activity: Activity) {
         outputFile: File,
         bitRate: Int,
         zoom: ZoomTransform? = null,
+        enhance: Boolean = false,
         onProgress: (frameNo: Int, total: Int, rateFps: Double, etaSec: Long) -> Unit,
         isCancelled: () -> Boolean
     ): RenderOutcome {
@@ -302,6 +305,24 @@ class RenderEngine(private val activity: Activity) {
         try {
             val frameBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888) // allocate ONCE
             val blit = Paint().apply { isFilterBitmap = false }
+            if (enhance) {
+                // Real, fast color-grade enhance: contrast 1.12 around mid-gray
+                // + saturation 1.18, applied at native speed during the blit.
+                // Deterministic - honestly NOT an AI model (see preview note).
+                val cm = ColorMatrix()
+                cm.setSaturation(1.18f)
+                cm.postConcat(
+                    ColorMatrix(
+                        floatArrayOf(
+                            1.12f, 0f, 0f, 0f, -15.3f,
+                            0f, 1.12f, 0f, 0f, -15.3f,
+                            0f, 0f, 1.12f, 0f, -15.3f,
+                            0f, 0f, 0f, 1f, 0f
+                        )
+                    )
+                )
+                blit.colorFilter = ColorMatrixColorFilter(cm)
+            }
 
             encoder = VideoEncoder(w, h, fps, bitRate, outputFile)
             encoder.start()
@@ -358,7 +379,15 @@ class RenderEngine(private val activity: Activity) {
 
             encoder.signalEos()
             encoder.drain(true)
-            val firstFrame = frameBmp.copy(Bitmap.Config.ARGB_8888, false)
+            val firstFrame = if (blit.colorFilter != null) {
+                // frame0.png must match the video's first frame (acceptance 4):
+                // export it with the same enhance grade applied.
+                Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { g ->
+                    Canvas(g).drawBitmap(frameBmp, null, Rect(0, 0, w, h), blit)
+                }
+            } else {
+                frameBmp.copy(Bitmap.Config.ARGB_8888, false)
+            }
             encoder.release()
             return RenderOutcome.Completed(firstFrame)
         } catch (e: Exception) {

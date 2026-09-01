@@ -187,10 +187,11 @@ class MainActivity : Activity() {
         val resRow = toggleRow(
             col, "RESOLUTION",
             listOf(
-                "1080p" to { resW = 1920; resH = 1080 },
-                "720p" to { resW = 1280; resH = 720 }
+                "1080p" to { resW = 1920; resH = 1080; bitRate = 16_000_000 },
+                "720p" to { resW = 1280; resH = 720; bitRate = 8_000_000 },
+                "480p" to { resW = 854; resH = 480; bitRate = 8_000_000 }
             ),
-            if (resW == 1920) 0 else 1
+            if (resW == 1920) 0 else if (resW == 1280) 1 else 2
         )
         val fpsRow = toggleRow(
             col, "FPS",
@@ -366,20 +367,66 @@ class MainActivity : Activity() {
         val frameHolder = LinearLayout(this)
         val statusLock = monoTv("FRAME ${resW}x${resH}", 13, AMBER, true)
 
+        // Manual-framing controls (visible only in MANUAL): zoom readout +
+        // editor-style preset row. FULL = whole page (scale 1, no pan);
+        // CENTER = center current zoom; CROP = corner-handle crop over the
+        // base page (thirds grid, dimmed outside); APPLY commits the crop.
+        val zoomLabel = monoTv("zoom 100% · pan +0.0% +0.0%", 11, TXT2)
+        var zoomView: ZoomView? = null
+        var enhanceOn = false
+        val btnFull = mkButton("FULL")
+        val btnCenter = mkButton("CENTER")
+        val btnCrop = mkButton("CROP")
+        val btnApply = mkButton("APPLY", filled = true)
+        btnApply.isEnabled = false
+        btnFull.setOnClickListener { zoomView?.resetFull() }
+        btnCenter.setOnClickListener { zoomView?.centerContent() }
+        btnCrop.setOnClickListener { zoomView?.enterCrop() }
+        btnApply.setOnClickListener { zoomView?.applyCrop() }
+        val manualCtrls = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        val presetRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        listOf(btnFull, btnCenter, btnCrop, btnApply).forEachIndexed { i, b ->
+            presetRow.addView(
+                b,
+                LinearLayout.LayoutParams(0, dp(38), 1f).apply {
+                    if (i > 0) marginStart = dp(4)
+                }
+            )
+        }
+        manualCtrls.addView(zoomLabel)
+        manualCtrls.addView(spacer(dp(4)))
+        manualCtrls.addView(presetRow)
+
         fun rebuildFrame() {
             frameHolder.removeAllViews()
             if (manual) {
-                frameHolder.addView(
-                    ZoomView(this, p.thumb, zoom).apply {
-                        onTransform = { zoom = it }
-                        layoutParams = LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.WRAP_CONTENT
-                        )
-                    }
+                val zv = ZoomView(this, p.thumb, zoom)
+                zv.onTransform = { t ->
+                    zoom = t
+                    zoomLabel.text = String.format(
+                        Locale.US,
+                        "zoom %.0f%% · pan %+.1f%% %+.1f%%",
+                        t.scale * 100f, t.panNx * 100f, t.panNy * 100f
+                    )
+                }
+                zv.onModeChange = { editing ->
+                    btnCrop.isEnabled = !editing
+                    btnApply.isEnabled = editing
+                }
+                zv.layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
                 )
-                statusLock.text = "FRAME ${resW}x${resH} · MANUAL · pinch/drag · dbl-tap reset"
+                zoomView = zv
+                frameHolder.addView(zv)
+                statusLock.text =
+                    "FRAME ${resW}x${resH} · MANUAL · pinch/drag or CROP · dbl-tap reset"
+                manualCtrls.visibility = View.VISIBLE
             } else {
+                zoomView = null
                 frameHolder.addView(ImageView(this).apply {
                     setImageBitmap(drawDetectionOverlay(p))
                     adjustViewBounds = true
@@ -390,6 +437,7 @@ class MainActivity : Activity() {
                 })
                 statusLock.text =
                     "FRAME ${resW}x${resH} · LOCKED · CORNERS ±${p.cornerDeviationPx}px"
+                manualCtrls.visibility = View.GONE
             }
         }
 
@@ -406,6 +454,7 @@ class MainActivity : Activity() {
         }
         col.addView(monoTv("detected timeline: ${p.durationMs / 1000.0} s", 12, TXT2))
         col.addView(spacer(dp(10)))
+        col.addView(manualCtrls) // visible only in MANUAL framing
 
         if (p.cornerDeviationPx >= 0) {
             col.addView(monoTv("FRAMING", 11, TXT2))
@@ -456,6 +505,20 @@ class MainActivity : Activity() {
             if (bitRate == 8_000_000) 0 else if (bitRate == 24_000_000) 2 else 1
         )
 
+        // ENHANCE: honest naming - a fast native ColorMatrix color grade
+        // (contrast ~1.12 around mid-gray + saturation 1.18), not an AI model
+        // (zero-dependency app, nothing bundled, nothing uploaded). Pops soft
+        // raster content; frame0.png is exported with the same grade so QC
+        // still matches the video's first frame.
+        toggleRow(
+            col, "ENHANCE",
+            listOf(
+                "OFF" to { enhanceOn = false },
+                "ON" to { enhanceOn = true }
+            ),
+            0
+        )
+
         // Duration: auto-detected, editable, clamped to 5-600 s on start.
         col.addView(monoTv("DURATION (s)", 11, TXT2))
         val dur = EditText(this).apply {
@@ -477,7 +540,7 @@ class MainActivity : Activity() {
             setOnClickListener {
                 val secs = dur.text.toString().toIntOrNull() ?: 5
                 val zv = if (manual) (zoom ?: ZoomTransform(1f, 0f, 0f)) else null
-                startRender(p, secs.coerceIn(5, 600), zv)
+                startRender(p, secs.coerceIn(5, 600), zv, enhanceOn)
             }
         })
         col.addView(spacer(dp(8)))
@@ -537,14 +600,15 @@ class MainActivity : Activity() {
     private fun startRender(
         p: RenderEngine.PrepareResult.Ok,
         durationSec: Int,
-        zoom: ZoomTransform?
+        zoom: ZoomTransform?,
+        enhance: Boolean
     ) {
         cancelRequested = false
         rendering = true
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         showRenderScreen(durationSec)
         renderThread = Thread {
-            val outcome = runRenderJob(p, durationSec, zoom)
+            val outcome = runRenderJob(p, durationSec, zoom, enhance)
             rendering = false
             runOnUiThread {
                 window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -621,7 +685,8 @@ class MainActivity : Activity() {
     private fun runRenderJob(
         p: RenderEngine.PrepareResult.Ok,
         durationSec: Int,
-        zoom: ZoomTransform?
+        zoom: ZoomTransform?,
+        enhance: Boolean
     ): RenderEngine.RenderOutcome {
         val total = durationSec * fps
         // Section 6 baseline (16 Mbps final / 8 Mbps draft) is now the default
@@ -635,6 +700,7 @@ class MainActivity : Activity() {
             outputFile = out,
             bitRate = bitRate,
             zoom = zoom,
+            enhance = enhance,
             onProgress = { f, t, rate, eta ->
                 runOnUiThread { updateRenderProgress(f, t, rate, eta) }
             },
