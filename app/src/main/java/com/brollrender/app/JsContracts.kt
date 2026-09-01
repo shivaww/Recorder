@@ -164,4 +164,33 @@ object JsContracts {
           return fams.length;
         })()
     """.trimIndent()
+
+    // SFX events (declarative audio): a data-only JSON block in the page -
+    //   <script type="application/json" id="sfx">
+    //     [{"t":16.2,"id":"slam","gain":0.9}, ...]
+    //   </script>
+    // t is seconds on the SAME timeline as animation-delay. The engine
+    // synthesizes + mixes these onto the MP4's audio track; the zero-JS
+    // rule stays intact because the block is data, not logic.
+    val SFX_MANIFEST_JS = """
+        (() => {
+          const el = document.querySelector('script#sfx[type="application/json"]');
+          if (!el) return { events: [] };
+          try {
+            const d = JSON.parse(el.textContent);
+            const evs = Array.isArray(d) ? d : (d.events || []);
+            const out = [];
+            for (const e of evs) {
+              const t = +e.t;
+              if (!isFinite(t) || t < 0) continue;
+              out.push({
+                t: t,
+                id: String(e.id || 'tick'),
+                gain: Math.min(1, Math.max(0, +e.gain || 0.7))
+              });
+            }
+            return { events: out };
+          } catch (err) { return { error: String(err) }; }
+        })()
+    """.trimIndent()
 }

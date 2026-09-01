@@ -39,3 +39,19 @@ Optional belt-and-suspenders (NOT required - frame-fit already handles it): make
 
     .fit { aspect-ratio:16/9; container-type:size; overflow:hidden;
            width:100vw; max-width:177.78vh; margin:0 auto; }
+
+## SFX - declarative sound effects (app support in progress)
+
+The renderer can bake synthesized SFX into the MP4's audio track. To opt in, every generated file carries a DATA-ONLY manifest (not logic - the zero-JS rule is untouched):
+
+    <script type="application/json" id="sfx">
+    [{"t":16.2,"id":"slam","gain":0.9},{"t":10.4,"id":"tick","gain":0.5}]
+    </script>
+
+Rules for the generation prompt:
+- t = seconds on the SAME timeline as animation-delay (the spoken-beat clock)
+- one event per visual beat, max ~12 per 60s block; the mega-slam always gets "slam"
+- vocabulary: slam (stamp / kinetic word landing), boom (deep impact), whoosh (enter/exit sweep), tick (small UI/HUD), rise (build-up INTO a beat - place at impactT minus 0.8), ding (reveal), pop (small object), glitch (error/reject)
+- gain 0-1, default 0.7
+
+Why manifest instead of audio elements: the render scrubs the frozen CSS clock at render speed (not real time), so live audio can never stay in sync. Declared events are synthesized app-side and muxed on the same master frame clock - sample-accurate, offline, deterministic, no audio files in the HTML.
