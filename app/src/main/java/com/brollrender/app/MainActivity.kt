@@ -363,7 +363,9 @@ class MainActivity : Activity() {
         // frame (WYSIWYG). Defaults to MANUAL when detection failed, so
         // arbitrary HTML still records.
         var manual = p.manualRecommended
-        var zoom: ZoomTransform? = null
+        // Seed with the engine's auto-fit suggestion (non-conforming pages):
+        // preview opens already fitted; user can still pinch/crop from here.
+        var zoom: ZoomTransform? = p.suggestedZoom
         val frameHolder = LinearLayout(this)
         val statusLock = monoTv("FRAME ${resW}x${resH}", 13, AMBER, true)
 
@@ -422,8 +424,18 @@ class MainActivity : Activity() {
                 )
                 zoomView = zv
                 frameHolder.addView(zv)
-                statusLock.text =
+                zoom?.let {
+                    zoomLabel.text = String.format(
+                        Locale.US,
+                        "zoom %.0f%% · pan %+.1f%% %+.1f%%",
+                        it.scale * 100f, it.panNx * 100f, it.panNy * 100f
+                    )
+                }
+                statusLock.text = if (p.suggestedZoom != null) {
+                    "FRAME ${resW}x${resH} · MANUAL · AUTO-FITTED · pinch/drag or CROP"
+                } else {
                     "FRAME ${resW}x${resH} · MANUAL · pinch/drag or CROP · dbl-tap reset"
+                }
                 manualCtrls.visibility = View.VISIBLE
             } else {
                 zoomView = null

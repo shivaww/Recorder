@@ -47,7 +47,8 @@ class RenderEngine(private val activity: Activity) {
             val fontsLoaded: Boolean, // false = fonts.status never reached 'loaded' within 30 s
             val manualRecommended: Boolean = false, // detection failed -> manual framing
             val note: String? = null,               // why (e.g. FRAME_NOT_FOUND detail)
-            val fontsWarning: String? = null        // webfont mismatch (warning, not abort)
+            val fontsWarning: String? = null,       // webfont mismatch (warning, not abort)
+            val suggestedZoom: ZoomTransform? = null // initial auto-fit (non-conforming pages)
         ) : PrepareResult()
 
         data class Fail(val message: String) : PrepareResult()
@@ -245,6 +246,23 @@ class RenderEngine(private val activity: Activity) {
                 return PrepareResult.Fail("0 animations locked - nothing to render")
             }
 
+            // Auto-fit for non-conforming pages (qwen video-audit verdict:
+            // ~2.9x observed vs ~2.75x density prediction): phone-authored
+            // pages render small in the WebView's CSS viewport. Contain-fit
+            // the measured content bounds and apply as the INITIAL manual
+            // framing - content re-rasterizes, no bitmap upscaling (rule 2).
+            var suggestedZoom: ZoomTransform? = null
+            if (ok == null) {
+                suggestedZoom = computeAutoFit(web)
+                if (suggestedZoom != null) {
+                    evalJs(
+                        web,
+                        JsContracts.zoomJs(suggestedZoom.scale, suggestedZoom.panNx, suggestedZoom.panNy)
+                    )
+                    Thread.sleep(150) // style recalc settles before the thumb
+                }
+            }
+
             // t=0 thumbnail - same draw-inside-callback discipline as the loop.
             val thumb = Bitmap.createBitmap(THUMB_W, THUMB_H, Bitmap.Config.ARGB_8888)
             val thumbLatch = CountDownLatch(1)
@@ -270,11 +288,51 @@ class RenderEngine(private val activity: Activity) {
                 fontsLoaded,
                 manualRecommended = ok == null,
                 note = manualNote,
-                fontsWarning = fontsWarning
+                fontsWarning = fontsWarning,
+                suggestedZoom = suggestedZoom
             )
         } catch (e: Exception) {
             return PrepareResult.Fail("prepare failed: ${e.message}")
         }
+    }
+
+    /**
+     * Contain-fit the page's content bounds (CONTENT_BOUNDS_JS, CSS px) into
+     * the CSS viewport, centered, as the initial manual framing. The viewport
+     * is 16:9 (WebView laid out at W x H), so fitting it in CSS space is
+     * fitting the video frame in output space. Null = unreadable bounds (the
+     * user frames manually, scale 1).
+     */
+    private fun computeAutoFit(web: WebView): ZoomTransform? {
+        val raw = evalJs(web, JsContracts.CONTENT_BOUNDS_JS) ?: return null
+        val o = try {
+            JSONObject(raw)
+        } catch (e: Exception) {
+            return null
+        }
+        if (o.has("error")) return null
+        val x = o.optDouble("x", Double.NaN)
+        val y = o.optDouble("y", Double.NaN)
+        val w = o.optDouble("w", Double.NaN)
+        val h = o.optDouble("h", Double.NaN)
+        val vw = o.optDouble("vw", Double.NaN)
+        val vh = o.optDouble("vh", Double.NaN)
+        if (x.isNaN() || y.isNaN() || w.isNaN() || h.isNaN() || vw.isNaN() || vh.isNaN()) {
+            return null
+        }
+        if (w < 1.0 || h < 1.0 || vw < 1.0 || vh < 1.0) return null
+        val scale = (min(vw / w, vh / h)).coerceIn(0.25, 4.0) // contain, clamped
+        val fittedW = w * scale
+        val fittedH = h * scale
+        // Center the fitted box; translate is applied BEFORE scale in the
+        // ZOOM contract, so it uses unscaled CSS px.
+        val cssTx = (vw - fittedW) / 2.0 - x * scale
+        val cssTy = (vh - fittedH) / 2.0 - y * scale
+        return ZoomTransform(
+            scale.toFloat(),
+            (cssTx / vw).toFloat(),
+            (cssTy / vh).toFloat()
+        )
     }
 
     /**
@@ -329,13 +387,13 @@ class RenderEngine(private val activity: Activity) {
             val surface = encoder.inputSurface
                 ?: throw RuntimeException("encoder produced no input surface")
 
-            if (zoom != null) {
-                // Manual framing: the CSS transform re-rasterizes content at
-                // the zoomed size - never a bitmap upscale of the capture
-                // (rule 2 intact). Style recalc settles before frame 0's draw.
-                evalJs(web, JsContracts.zoomJs(zoom.scale, zoom.panNx, zoom.panNy))
-                Thread.sleep(150)
-            }
+            // Framing transform - ALWAYS written, not just when manual: an
+            // AUTO capture (zoom == null) gets an explicit identity reset so
+            // a stale transform from an earlier preview (auto-fit suggestion
+            // or pinch state) can never leak into the render.
+            val effectiveZoom = zoom ?: ZoomTransform(1f, 0f, 0f)
+            evalJs(web, JsContracts.zoomJs(effectiveZoom.scale, effectiveZoom.panNx, effectiveZoom.panNy))
+            Thread.sleep(150) // style recalc settles before frame 0's draw
 
             for (f in 0 until totalFrames) {
                 if (isCancelled()) {

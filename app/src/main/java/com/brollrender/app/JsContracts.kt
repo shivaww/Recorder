@@ -96,4 +96,28 @@ object JsContracts {
             .replace("PNX", String.format(java.util.Locale.US, "%.4f", panNx))
             .replace("PNY", String.format(java.util.Locale.US, "%.4f", panNy))
             .replace("SCALE", String.format(java.util.Locale.US, "%.4f", scale))
+
+    // Auto-fit for non-conforming pages: content bounds in CSS px at t=0
+    // (every visible element's getBoundingClientRect union, fixed included).
+    // The engine contain-fits these into the CSS viewport - which mirrors the
+    // 16:9 output canvas because the WebView is laid out at W x H.
+    val CONTENT_BOUNDS_JS = """
+        (() => {
+          const de = document.documentElement;
+          const vw = de.clientWidth, vh = de.clientHeight;
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          const els = document.body ? document.body.querySelectorAll('*') : [];
+          for (const el of els) {
+            if (el.offsetParent === null &&
+                getComputedStyle(el).position !== 'fixed') continue;
+            const r = el.getBoundingClientRect();
+            if (r.width < 1 || r.height < 1) continue;
+            minX = Math.min(minX, r.left); minY = Math.min(minY, r.top);
+            maxX = Math.max(maxX, r.right); maxY = Math.max(maxY, r.bottom);
+          }
+          if (minX === Infinity) return { error: 'NO_CONTENT' };
+          return { x: minX, y: minY, w: maxX - minX, h: maxY - minY,
+                   vw: vw, vh: vh };
+        })()
+    """.trimIndent()
 }
