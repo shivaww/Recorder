@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="void_bg">#FF0A0C10</color>
+    <color name="amber">#FFFFB454</color>
+    <color name="amber_dim">#99FFB454</color>
+    <color name="text_primary">#FFF2F4F8</color>
+    <color name="text_secondary">#FF8A93A6</color>
+    <color name="surface">#FF12151C</color>
+    <color name="surface_stroke">#FF232833</color>
+    <color name="error_red">#FFFF6B6B</color>
+</resources>

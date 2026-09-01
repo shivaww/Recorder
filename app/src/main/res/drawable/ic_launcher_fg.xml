@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Four amber corner brackets: the app's detection-lock motif. -->
+    <path
+        android:pathData="M21,37 L21,21 L37,21"
+        android:strokeColor="#FFB454"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M71,21 L87,21 L87,37"
+        android:strokeColor="#FFB454"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M87,71 L87,87 L71,87"
+        android:strokeColor="#FFB454"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M37,87 L21,87 L21,71"
+        android:strokeColor="#FFB454"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- Play glyph, optically centered. -->
+    <path
+        android:pathData="M49,44 L65,54 L49,64 Z"
+        android:fillColor="#FFB454" />
+</vector>
