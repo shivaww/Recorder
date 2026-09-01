@@ -30,3 +30,12 @@ The app checks every family actually requested in the page's Google Fonts `<link
 2. Scrub-verify the manifest MEGA-SLAM timestamp (e.g. @16.2s): punch-word + ring-burst exactly there. Frame-accurate at 30 fps.
 3. Check "animations locked: N" > 0 (N ~ number of timed elements; N = 0 means the AI slipped JS motion in - regenerate).
 4. Render FINAL 1080p30. Bottom 25% stays empty for captions layered in the editor later.
+
+## "Do my prompt's font/element sizes need to change?" - No
+
+Small-looking renders were a viewport-scale artifact, never a design-size problem. The prompt sizes everything in cqh - fractions of the 16:9 frame - and the app guarantees that frame maps onto the full output canvas: AUTO lock (+-2 px) when it fills the window, frame-fit when the black-wrapper design makes it smaller (CSS re-rasterization - text and SVG strokes at full output resolution). Keep the punch-word (8-15cqh) vs label (1.4-2.3cqh) budget exactly as the prompt defines it.
+
+Optional belt-and-suspenders (NOT required - frame-fit already handles it): make .fit fill the window itself so the app's fit scale stays ~1:
+
+    .fit { aspect-ratio:16/9; container-type:size; overflow:hidden;
+           width:100vw; max-width:177.78vh; margin:0 auto; }
