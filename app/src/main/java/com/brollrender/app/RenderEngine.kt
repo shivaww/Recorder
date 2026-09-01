@@ -12,6 +12,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import org.json.JSONObject
+import org.json.JSONTokener
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -57,10 +58,27 @@ class RenderEngine(private val activity: Activity) {
 
     private var webView: WebView? = null
 
-    private fun parseJsonObject(raw: String?): JSONObject? = try {
-        if (raw == null) null else JSONObject(raw)
-    } catch (e: Exception) {
-        null
+    /**
+     * evaluateJavascript results are JSON-ENCODED (spec section 3), and the
+     * JSON.stringify(...) probes are double-wrapped: JS returns a string,
+     * the WebView then encodes it again. Unwrap one or two layers before
+     * handing the result to JSONObject.
+     */
+    private fun parseJsonObject(raw: String?): JSONObject? {
+        if (raw == null) return null
+        var v: Any? = try {
+            JSONTokener(raw).nextValue()
+        } catch (e: Exception) {
+            return null
+        }
+        if (v is String) {
+            v = try {
+                JSONTokener(v).nextValue()
+            } catch (e: Exception) {
+                null
+            }
+        }
+        return v as? JSONObject
     }
 
     /** evaluateJavascript on the UI thread, latched; result stays JSON-encoded. */
@@ -162,8 +180,11 @@ class RenderEngine(private val activity: Activity) {
             }
 
             // Capability gate before anything else (pitfall 7.14).
-            val caps = parseJsonObject(evalJs(web, JsContracts.CAPABILITY_JS))
-                ?: return PrepareResult.Fail("capability probe returned nothing")
+            val rawCaps = evalJs(web, JsContracts.CAPABILITY_JS)
+            val caps = parseJsonObject(rawCaps)
+                ?: return PrepareResult.Fail(
+                    "capability probe returned: ${rawCaps?.take(120) ?: "nothing"}"
+                )
             if (!caps.optBoolean("anims") || !caps.optBoolean("containers")) {
                 return PrepareResult.Fail(
                     "WebView too old - update Android System WebView (Chromium 105+ required)"
@@ -182,8 +203,11 @@ class RenderEngine(private val activity: Activity) {
                 Thread.sleep(200)
             }
             if (fontsLoaded) {
-                val chk = parseJsonObject(evalJs(web, JsContracts.FONTS_CHECK_JS))
-                    ?: return PrepareResult.Fail("fonts check returned nothing")
+                val rawChk = evalJs(web, JsContracts.FONTS_CHECK_JS)
+                val chk = parseJsonObject(rawChk)
+                    ?: return PrepareResult.Fail(
+                        "fonts check returned: ${rawChk?.take(120) ?: "nothing"}"
+                    )
                 if (!chk.optBoolean("anton") || !chk.optBoolean("plex")) {
                     return PrepareResult.Fail(
                         "webfonts not loaded - allow internet once (first render fetches Google Fonts)"
