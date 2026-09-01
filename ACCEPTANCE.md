@@ -13,7 +13,7 @@ Run against any HTML file (conforming files auto-detect the frame; non-conformin
 | 5 | Draft (720p24) completes at least 2x faster than Final | | |
 | 6 | CANCEL mid-render leaves no partial file in Movies/BrollRender; an immediate second render works | | |
 | 7 | Second render of the same HTML uses zero network (fonts from WebView cache - check airplane mode) | | |
-| 8 | Broken HTML (no `.fit`): lands on PREVIEW with the detection note + MANUAL framing defaulted - renders successfully, no crash | | |
+| 8 | Broken HTML (no `.fit`): lands on PREVIEW with the detection note + MANUAL framing defaulted (AUTO-FITTED) - renders successfully, no crash | | |
 
 ## Customization round
 
@@ -26,5 +26,6 @@ Run against any HTML file (conforming files auto-detect the frame; non-conformin
 | 13 | fps 60: duration correct and motion smooth (frame count = 60 x duration) | | |
 | 14 | ENHANCE ON vs OFF: first frame visibly more contrast/saturation ON; frame0.png still matches the video | | |
 | 15 | No screen capture: let a notification arrive mid-render (or take a screenshot) - none of it appears in the output video | | |
+| 16 | Non-conforming page opens AUTO-FITTED: content fills the amber brackets (status line shows `MANUAL · AUTO-FITTED`), matching a manual screen-recording's framing - NOT small in a dark void | | |
 
 Every FAIL gets a one-line note: what was seen vs what was expected, and at which screen (PICK/PREVIEW/RENDER/DONE). Update this file in the repo after each run - the checklist is the definition of done.

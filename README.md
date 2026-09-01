@@ -19,7 +19,7 @@ Output lands in `Movies/BrollRender/BrollRender_<stamp>.mp4`, with `Pictures/Bro
 
 ## Manual framing - no quality loss
 
-Zoom and crop are applied as a CSS transform on the page itself, so content re-rasterizes at the output resolution - crisp text and vectors at any zoom, never a bitmap upscale of the capture. Known limits: `position:fixed` elements and `vw/vh`-sized layout will not pan; raster images soften when zoomed. Conforming HTML (a `.fit` 16:9 frame containing `.stage`) still auto-detects; non-conforming HTML falls back to manual framing instead of aborting. The one hard requirement: at least one CSS animation - the whole engine scrubs `document.getAnimations()`.
+Zoom and crop are applied as a CSS transform on the page itself, so content re-rasterizes at the output resolution - crisp text and vectors at any zoom, never a bitmap upscale of the capture. Known limits: `position:fixed` elements and `vw/vh`-sized layout will not pan; raster images soften when zoomed. Conforming HTML (a `.fit` 16:9 frame containing `.stage`) still auto-detects; non-conforming HTML falls back to manual framing instead of aborting, initialized by an automatic content-bounds fit (contain + center) so phone-authored pages fill the frame instead of rendering small in the void. The one hard requirement: at least one CSS animation - the whole engine scrubs `document.getAnimations()`.
 
 ## ENHANCE - honest naming
 
