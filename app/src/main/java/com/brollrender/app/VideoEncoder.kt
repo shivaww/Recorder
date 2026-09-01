@@ -21,7 +21,7 @@ class VideoEncoder(
     private val width: Int,
     private val height: Int,
     private val fps: Int,
-    bitRate: Int,
+    private val bitRate: Int,
     outputFile: File
 ) {
     private lateinit var codec: MediaCodec

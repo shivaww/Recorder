@@ -5,7 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
-import android.view.FrameLayout
+import android.widget.FrameLayout
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebSettings
@@ -268,7 +268,7 @@ class RenderEngine(private val activity: Activity) {
         val t0 = System.currentTimeMillis()
         try {
             val frameBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888) // allocate ONCE
-            val blit = Paint().apply { filterBitmap = false }
+            val blit = Paint().apply { isFilterBitmap = false }
 
             encoder = VideoEncoder(w, h, fps, bitRate, outputFile)
             encoder.start()
