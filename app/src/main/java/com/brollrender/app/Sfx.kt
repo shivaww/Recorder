@@ -18,6 +18,17 @@ import kotlin.math.sin
 object Sfx {
 
     const val SAMPLE_RATE = 44100
+
+    // Master output gain - one constant, tuned from on-device feedback.
+    // 0.45 ~= -7 dBFS: comfortable phone playback with clipping headroom.
+    private const val MASTER_GAIN = 0.45f
+
+    /** Page-declared loudness preference -> gain multiplier. */
+    fun loudnessMultiplier(loudness: String?): Float = when (loudness) {
+        "low", "quiet" -> 0.5f
+        "high", "loud" -> 1.6f
+        else -> 1.0f
+    }
     private const val TAU = Math.PI * 2.0
 
     /** One declared sound event: start time (s), vocabulary id, gain 0..1. */
@@ -168,7 +179,7 @@ object Sfx {
      * 0.25 s tail so the last decay is not cut). Soft-clip (x/(1+|x|)) keeps
      * overlapping events from hard-distorting.
      */
-    fun mix(events: List<Event>, durationSec: Double): ShortArray {
+    fun mix(events: List<Event>, durationSec: Double, loudness: String? = null): ShortArray {
         val total = (durationSec * SAMPLE_RATE).toInt() + SAMPLE_RATE / 4
         val acc = FloatArray(total)
         for (e in events) {
@@ -181,7 +192,7 @@ object Sfx {
         val out = ShortArray(total)
         for (i in 0 until total) {
             val x = acc[i] / (1.0 + abs(acc[i]))
-            out[i] = (x * 32767.0 * 0.95).toInt().toShort()
+            out[i] = (x * 32767.0 * MASTER_GAIN * loudnessMultiplier(loudness)).toInt().toShort()
         }
         return out
     }

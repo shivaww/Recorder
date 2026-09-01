@@ -97,6 +97,16 @@ object JsContracts {
             .replace("PNY", String.format(java.util.Locale.US, "%.4f", panNy))
             .replace("SCALE", String.format(java.util.Locale.US, "%.4f", scale))
 
+    // Page "voice": CSS zoom on <body> (Chromium) - scales the whole layout
+    // proportionally (cqh recompute against the zoomed container, so the
+    // design scales coherently). Render-time only, independent of the
+    // framing transform on <html>.
+    private const val TEXT_SCALE_TEMPLATE =
+        "(() => { document.body.style.zoom = 'ZV'; return 1; })()"
+
+    fun textScaleJs(scale: Float): String =
+        TEXT_SCALE_TEMPLATE.replace("ZV", String.format(java.util.Locale.US, "%.4f", scale))
+
     // Auto-fit for non-conforming pages: content bounds in CSS px at t=0
     // (every visible element's getBoundingClientRect union, fixed included).
     // The engine contain-fits these into the CSS viewport - which mirrors the

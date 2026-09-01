@@ -52,6 +52,7 @@ class RenderEngine(private val activity: Activity) {
             val fontsWarning: String? = null,       // webfont mismatch (warning, not abort)
             val fontsDetail: String? = null,        // families confirmed loaded (success)
             val sfxEvents: List<Sfx.Event> = emptyList(), // declarative #sfx manifest events
+            val sfxLoudness: String? = null,               // page-declared loudness (low/normal/high)
             val suggestedZoom: ZoomTransform? = null // initial auto-fit (non-conforming pages)
         ) : PrepareResult()
 
@@ -299,6 +300,7 @@ class RenderEngine(private val activity: Activity) {
             // block, on the same timeline as animation-delay.
             var sfxEvents: List<Sfx.Event> = emptyList()
             val sfxObj = parseJsonObject(evalJs(web, JsContracts.SFX_MANIFEST_JS))
+            val sfxLoudness = sfxObj?.optString("loudness")?.lowercase()
             val sfxArr = sfxObj?.optJSONArray("events")
             if (sfxArr != null) {
                 val evs = mutableListOf<Sfx.Event>()
@@ -370,6 +372,7 @@ class RenderEngine(private val activity: Activity) {
                 fontsWarning = fontsWarning,
                 fontsDetail = fontsDetail,
                 sfxEvents = sfxEvents,
+                sfxLoudness = sfxLoudness,
                 suggestedZoom = suggestedZoom
             )
         } catch (e: Exception) {
@@ -451,6 +454,8 @@ class RenderEngine(private val activity: Activity) {
         zoom: ZoomTransform? = null,
         enhance: Boolean = false,
         sfxEvents: List<Sfx.Event> = emptyList(),
+        sfxLoudness: String? = null,
+        textScale: Float = 1f,
         onProgress: (frameNo: Int, total: Int, rateFps: Double, etaSec: Long) -> Unit,
         isCancelled: () -> Boolean
     ): RenderOutcome {
@@ -489,7 +494,11 @@ class RenderEngine(private val activity: Activity) {
             var audioFormat: MediaFormat? = null
             var audioSamples: List<AudioEncoder.Sample> = emptyList()
             if (sfxEvents.isNotEmpty()) {
-                val pcm = Sfx.mix(sfxEvents, totalFrames.toDouble() / fps)
+                // Audio prep is user-visible work: report the two stages so
+                // the pre-loop phase never reads as a hang (-1 / -2 codes).
+                onProgress(-1, totalFrames, 0.0, -1) // "AUDIO: mixing"
+                val pcm = Sfx.mix(sfxEvents, totalFrames.toDouble() / fps, sfxLoudness)
+                onProgress(-2, totalFrames, 0.0, -1) // "AUDIO: encoding (aac)"
                 val encoded = AudioEncoder().encode(pcm)
                 audioFormat = encoded.format
                 audioSamples = encoded.samples
@@ -506,6 +515,12 @@ class RenderEngine(private val activity: Activity) {
             val effectiveZoom = zoom ?: ZoomTransform(1f, 0f, 0f)
             evalJs(web, JsContracts.zoomJs(effectiveZoom.scale, effectiveZoom.panNx, effectiveZoom.panNy))
             Thread.sleep(150) // style recalc settles before frame 0's draw
+            if (textScale != 1f) {
+                // Page voice: proportional CSS zoom on <body>, independent of
+                // the framing transform on <html> above.
+                evalJs(web, JsContracts.textScaleJs(textScale))
+                Thread.sleep(100)
+            }
 
             for (f in 0 until totalFrames) {
                 if (isCancelled()) {

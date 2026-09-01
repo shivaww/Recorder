@@ -66,11 +66,16 @@ as data, never played by the page. The rules below exist for that reason.
    </body>:
 
    <script type="application/json" id="sfx">
-   [{"t":16.2,"id":"slam","gain":0.9},{"t":10.4,"id":"whoosh","gain":0.6}]
+   {"loudness":"low","events":[
+     {"t":16.2,"id":"slam","gain":0.65},{"t":10.4,"id":"whoosh","gain":0.5}
+   ]}
    </script>
 
    Vocabulary (ids are FIXED): slam boom whoosh tick rise ding pop glitch.
-   t = seconds on the SAME clock as animation-delay; gain 0-1 (default 0.7).
+   t = seconds on the SAME clock as animation-delay; gain 0-1 (default 0.5).
+   Root object may carry "loudness": "low" | "normal" | "high" - default
+   "low" (the renderer applies its own master gain; the user can override
+   per render in the app).
    The renderer synthesizes + muxes these itself - nothing is fetched,
    nothing plays in the page.
 
@@ -96,7 +101,9 @@ as data, never played by the page. The rules below exist for that reason.
 ═══ TEXT RULE (most important) ═══
 
 - NEVER render the spoken sentence on screen.
-- On-screen text = labels, tags, stamps, numbers, punch-words ONLY.
+- On-screen text = ONE punch-word per shot, plus at most 2 tiny HUD
+  labels. Elements over text: diagrams, meters, strokes and shapes carry
+  the meaning; words punctuate, they do not explain.
 - "Text being written" = abstract skeleton bars, never real copy.
 - No emoji. Icons are self-drawn inline-SVG strokes.
 
@@ -175,7 +182,8 @@ Discipline:
 - <=14 events per 60s block; never two events within 120ms of each other
 - >=40% of any 10-second window stays SILENT - silence is the frame rate
   of sound
-- gains mostly 0.4-0.7; only the mega-slam may reach 0.9
+- gains mostly 0.35-0.55; only the mega-slam may reach 0.65 (declare
+  intent, not loudness - the renderer master-gains the mix)
 - no event past DUR + 0.2
 
 
@@ -184,8 +192,9 @@ Discipline:
 
 - BOLDNESS BUDGET: exactly ONE signature moment per shot; everything else
   whisper-disciplined.
-- SCALE CONTRAST: punch-words 10-18cqh vs labels 1.4-2.3cqh - every typed
-  shot contains >=5x size contrast somewhere.
+- SCALE CONTRAST: punch-words 12-20cqh vs labels 2.2-2.6cqh - every typed
+  shot contains >=5x size contrast somewhere. Text is BIG and comfortable
+  to read; the app's TEXT BIG toggle can add +25% on top at render time.
 - Every element animates IN - nothing just appears. Every shot animates OUT.
 - HOUSE EASINGS - only these four:
   SLAM  cubic-bezier(.2,1.35,.35,1)   (stamps, words landing)
@@ -226,7 +235,7 @@ fix any FAIL before shipping - do not output a file that fails) ═══
 5. zero px/vw/vh inside .fit
 6. colors only via custom props; both accents used semantically
 7. #sfx JSON parses - ids all in vocabulary - no t past DUR - no two events
-   within 120ms
+   within 120ms - loudness root is low/normal/high
 8. mega-slam visual stack AND slam sound share one exact t
 9. single file <=50KB, one fonts link, headless rule present
 10. mega-slam present at the block's biggest beat
@@ -236,7 +245,8 @@ fix any FAIL before shipping - do not output a file that fails) ═══
 
 1. BEAT TABLE
 2. MANIFEST line:
-   DUR:62s - FONTS:Anton+IBM Plex Mono - SHOTS:6 - MEGA-SLAM@16.2s - SFX:14
+   DUR:62s - FONTS:Anton+IBM Plex Mono - SHOTS:6 - MEGA-SLAM@16.2s -
+   SFX:14 (loudness:low)
    (that timestamp is the QC scrub-check: visual and sound land on the same
    frame)
 3. ONE self-contained HTML file

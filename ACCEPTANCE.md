@@ -29,5 +29,6 @@ Run against any HTML file (conforming files auto-detect the frame; non-conformin
 | 16 | Non-conforming page opens AUTO-FITTED: content fills the amber brackets (status line shows `MANUAL · AUTO-FITTED`), matching a manual screen-recording's framing - NOT small in a dark void | | |
 | 17 | SFX variant (`temporary_sfx.html`): MP4 has an audible audio track; the slam lands exactly with the 16.2s MEGA-SLAM (audio/video sync) | | |
 | 18 | Fixture 2 (`temporary2.html`, prompt-verbatim full-window .fit): PREVIEW shows AUTO `LOCKED`; at t=16.2s the white flash + double rings + chromatic ghosts + "PROOF?" land on ONE frame with the slam sound; odometer rolls, clip-path wipe + flip-card play; rise swell audible from ~15.4s | | |
+| 19 | RENDER screen shows `AUDIO: mixing` then `AUDIO: encoding` before frames start (no silent hang); SFX volume comfortable at default, QUIET vs LOUD audibly differ; TEXT BIG renders visibly larger text than COMPACT | | |
 
 Every FAIL gets a one-line note: what was seen vs what was expected, and at which screen (PICK/PREVIEW/RENDER/DONE). Update this file in the repo after each run - the checklist is the definition of done.

@@ -45,8 +45,12 @@ Optional belt-and-suspenders (NOT required - frame-fit already handles it): make
 The renderer can bake synthesized SFX into the MP4's audio track. To opt in, every generated file carries a DATA-ONLY manifest (not logic - the zero-JS rule is untouched):
 
     <script type="application/json" id="sfx">
-    [{"t":16.2,"id":"slam","gain":0.9},{"t":10.4,"id":"tick","gain":0.5}]
+    {"loudness":"low","events":[{"t":16.2,"id":"slam","gain":0.65}]}
     </script>
+
+The app master-gains the mix (0.45) and applies the declared loudness; the
+SFX VOLUME row in the app (QUIET/NORMAL/LOUD) starts at the page's declared
+value and the user's final choice wins.
 
 Rules for the generation prompt:
 - t = seconds on the SAME timeline as animation-delay (the spoken-beat clock)

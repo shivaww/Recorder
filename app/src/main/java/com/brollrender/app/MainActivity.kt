@@ -377,6 +377,8 @@ class MainActivity : Activity() {
         var zoomView: ZoomView? = null
         var enhanceOn = false
         var sfxOn = p.sfxEvents.isNotEmpty()
+        var textBig = true
+        var sfxVol: String = p.sfxLoudness ?: "normal"
         val btnFull = mkButton("FULL")
         val btnCenter = mkButton("CENTER")
         val btnCrop = mkButton("CROP")
@@ -532,7 +534,26 @@ class MainActivity : Activity() {
                 ),
                 if (sfxOn) 1 else 0
             )
+            // Volume row starts at the page's declared loudness; the user's
+            // final choice wins at render time.
+            toggleRow(
+                col, "SFX VOLUME",
+                listOf(
+                    "QUIET" to { sfxVol = "low" },
+                    "NORMAL" to { sfxVol = "normal" },
+                    "LOUD" to { sfxVol = "high" }
+                ),
+                if (sfxVol == "low") 0 else if (sfxVol == "high") 2 else 1
+            )
         }
+        toggleRow(
+            col, "TEXT",
+            listOf(
+                "COMPACT" to { textBig = false },
+                "BIG" to { textBig = true }
+            ),
+            if (textBig) 1 else 0
+        )
 
         // ENHANCE: honest naming - a fast native ColorMatrix color grade
         // (contrast ~1.12 around mid-gray + saturation 1.18), not an AI model
@@ -569,7 +590,10 @@ class MainActivity : Activity() {
             setOnClickListener {
                 val secs = dur.text.toString().toIntOrNull() ?: 5
                 val zv = if (manual) (zoom ?: ZoomTransform(1f, 0f, 0f)) else null
-                startRender(p, secs.coerceIn(5, 600), zv, enhanceOn, sfxOn)
+                startRender(
+                    p, secs.coerceIn(5, 600), zv, enhanceOn, sfxOn,
+                    if (textBig) 1.25f else 1f, sfxVol
+                )
             }
         })
         col.addView(spacer(dp(8)))
@@ -631,14 +655,16 @@ class MainActivity : Activity() {
         durationSec: Int,
         zoom: ZoomTransform?,
         enhance: Boolean,
-        sfxOn: Boolean
+        sfxOn: Boolean,
+        textScale: Float,
+        sfxVol: String
     ) {
         cancelRequested = false
         rendering = true
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         showRenderScreen(durationSec)
         renderThread = Thread {
-            val outcome = runRenderJob(p, durationSec, zoom, enhance, sfxOn)
+            val outcome = runRenderJob(p, durationSec, zoom, enhance, sfxOn, textScale, sfxVol)
             rendering = false
             runOnUiThread {
                 window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -699,6 +725,8 @@ class MainActivity : Activity() {
 
     private fun updateRenderProgress(f: Int, total: Int, rateFps: Double, etaSec: Long) {
         if (!::renderBar.isInitialized) return
+        if (f == -1) { renderStatus.text = "AUDIO: mixing events..."; return }
+        if (f == -2) { renderStatus.text = "AUDIO: encoding (aac)..."; return }
         renderBar.progress = f.coerceAtMost(renderBar.max)
         renderStatus.text = String.format(
             Locale.US, "frame %d/%d · %.1f f/s · ETA %s", f, total, rateFps, fmtEta(etaSec)
@@ -717,7 +745,9 @@ class MainActivity : Activity() {
         durationSec: Int,
         zoom: ZoomTransform?,
         enhance: Boolean,
-        sfxOn: Boolean
+        sfxOn: Boolean,
+        textScale: Float,
+        sfxVol: String
     ): RenderEngine.RenderOutcome {
         val total = durationSec * fps
         // Section 6 baseline (16 Mbps final / 8 Mbps draft) is now the default
@@ -733,6 +763,8 @@ class MainActivity : Activity() {
             zoom = zoom,
             enhance = enhance,
             sfxEvents = if (sfxOn) p.sfxEvents else emptyList(),
+            sfxLoudness = sfxVol,
+            textScale = textScale,
             onProgress = { f, t, rate, eta ->
                 runOnUiThread { updateRenderProgress(f, t, rate, eta) }
             },
