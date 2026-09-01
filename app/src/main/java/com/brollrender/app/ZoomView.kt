@@ -61,7 +61,7 @@ class ZoomView(
 
     private val voidPaint = Paint().apply { color = 0xFF0A0C10.toInt() }
     private val imgPaint = Paint().apply { isFilterBitmap = true } // preview-only smoothing
-    private val scrimPaint = Paint().apply { color = 0x88000000 }
+    private val scrimPaint = Paint().apply { color = 0x88000000.toInt() }
     private val outlinePaint = Paint().apply {
         color = 0x99FFB454.toInt()
         style = Paint.Style.STROKE
