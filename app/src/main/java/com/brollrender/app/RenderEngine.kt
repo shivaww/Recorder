@@ -15,6 +15,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import org.json.JSONObject
 import org.json.JSONTokener
+import kotlin.math.min
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -210,15 +211,33 @@ class RenderEngine(private val activity: Activity) {
             }
             var fontsWarning: String? = null
             if (fontsLoaded) {
-                val rawChk = evalJs(web, JsContracts.FONTS_CHECK_JS)
-                val chk = parseJsonObject(rawChk)
-                if (chk == null) {
-                    fontsWarning = "fonts check unreadable - look may differ"
-                } else if (!chk.optBoolean("anton") || !chk.optBoolean("plex")) {
-                    // Warning, not abort: the app now renders arbitrary HTML,
-                    // which may not use Anton / IBM Plex Mono at all.
-                    fontsWarning =
-                        "webfonts not loaded - allow internet once (look may differ)"
+                // Generic check first (generated pages may deviate from the
+                // default pairing): every family requested via the page's
+                // Google Fonts <link> must be loaded.
+                val rawGen = evalJs(web, JsContracts.FONTS_GENERIC_JS)
+                val gen = parseJsonObject(rawGen)
+                val fams = gen?.optJSONArray("families")
+                if (fams != null && fams.length() > 0) {
+                    val checks = gen.optJSONObject("checks")
+                    val missing = mutableListOf<String>()
+                    for (i in 0 until fams.length()) {
+                        val fam = fams.optString(i)
+                        if (checks == null || !checks.optBoolean(fam)) missing.add(fam)
+                    }
+                    if (missing.isNotEmpty()) {
+                        fontsWarning =
+                            "webfonts not loaded: ${missing.joinToString(", ")} - " +
+                                "allow internet once (look may differ)"
+                    }
+                } else {
+                    // No fonts <link> parsed: fall back to the default pairing.
+                    val chk = parseJsonObject(evalJs(web, JsContracts.FONTS_CHECK_JS))
+                    if (chk == null) {
+                        fontsWarning = "fonts check unreadable - look may differ"
+                    } else if (!chk.optBoolean("anton") || !chk.optBoolean("plex")) {
+                        fontsWarning =
+                            "webfonts not loaded - allow internet once (look may differ)"
+                    }
                 }
             }
 
@@ -236,7 +255,9 @@ class RenderEngine(private val activity: Activity) {
                 evalJs(web, JsContracts.DETECT_FRAME_JS)
             )
             val ok = det as? FrameDetector.Result.Ok
-            val manualNote = (det as? FrameDetector.Result.Fail)?.message
+            val under = det as? FrameDetector.Result.Undersized
+            val manualNote =
+                (det as? FrameDetector.Result.Fail)?.message ?: under?.message
 
             // Duration (5.6) + PAUSE (5.7).
             val durationMs =
@@ -253,7 +274,15 @@ class RenderEngine(private val activity: Activity) {
             // framing - content re-rasterizes, no bitmap upscaling (rule 2).
             var suggestedZoom: ZoomTransform? = null
             if (ok == null) {
-                suggestedZoom = computeAutoFit(web)
+                suggestedZoom = if (under != null) {
+                    // 16:9 frame smaller than the canvas (black-wrapper
+                    // design): fit THE FRAME to the canvas. Re-rasterized CSS
+                    // scaling - never a bitmap upscale (rule 2's intent:
+                    // never resample captured pixels).
+                    frameFitZoom(under)
+                } else {
+                    computeAutoFit(web)
+                }
                 if (suggestedZoom != null) {
                     evalJs(
                         web,
@@ -332,6 +361,25 @@ class RenderEngine(private val activity: Activity) {
             scale.toFloat(),
             (cssTx / vw).toFloat(),
             (cssTy / vh).toFloat()
+        )
+    }
+
+    /**
+     * Fit an undersized 16:9 frame to the full CSS viewport (which mirrors
+     * the 16:9 output canvas). Scale = contain-fit; pan maps the frame's
+     * top-left to the origin and centers any rounding sliver.
+     */
+    private fun frameFitZoom(u: FrameDetector.Result.Undersized): ZoomTransform? {
+        if (u.vw < 1.0 || u.vh < 1.0 || u.cssW < 1.0 || u.cssH < 1.0) return null
+        val s = min(u.vw / u.cssW, u.vh / u.cssH)
+        val fittedW = u.cssW * s
+        val fittedH = u.cssH * s
+        val cssTx = (u.vw - fittedW) / 2.0 - u.cssX * s
+        val cssTy = (u.vh - fittedH) / 2.0 - u.cssY * s
+        return ZoomTransform(
+            s.toFloat(),
+            (cssTx / u.vw).toFloat(),
+            (cssTy / u.vh).toFloat()
         )
     }
 

@@ -29,7 +29,7 @@ A native ColorMatrix color grade (contrast ~1.12 around mid-gray + saturation 1.
 
 - The 16:9 video frame is `<div class="fit">` (CSS `aspect-ratio: 16/9`, contains `.stage`); `#video-frame` is also supported. Everything outside it is crop chrome; `?headless=1` (plus an injected class) hides it.
 - All motion is CSS animations; the timeline is scrubbed via `document.getAnimations()` + `currentTime`.
-- Webfonts: Anton + IBM Plex Mono from Google Fonts - the first render needs internet, the WebView caches them afterwards (a warning, not an abort, if they are missing).
+- Webfonts: every family requested via the page's Google Fonts `<link>` is checked (default pairing Anton + IBM Plex Mono; deviations allowed) - the first render needs internet, the WebView caches them afterwards (a warning, not an abort, if they are missing).
 - Page void background: `#0A0C10` (the renderer's canvas pre-fill matches it).
 - The exact injected JS lives in `app/src/main/java/com/brollrender/app/JsContracts.kt` (frozen strings).
 

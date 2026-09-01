@@ -28,6 +28,21 @@ object FrameDetector {
         ) : Result()
 
         data class Fail(val message: String) : Result()
+
+        /**
+         * 16:9 frame detected but SMALLER than the target - common by design
+         * in generated pages (a black .viewport wrapper around the frame).
+         * The app frame-fits it (CSS re-rasterization, never a bitmap
+         * upscale) instead of aborting. CSS-px geometry is carried so the
+         * engine can compute the fit transform.
+         */
+        data class Undersized(
+            val rect: Rect,               // bitmap px (reference only)
+            val cssX: Double, val cssY: Double,
+            val cssW: Double, val cssH: Double,
+            val vw: Double, val vh: Double,
+            val message: String
+        ) : Result()
     }
 
     /** jsResult is the raw evaluateJavascript return of DETECT_FRAME_JS. */
@@ -85,15 +100,22 @@ object FrameDetector {
             )
         }
 
-        // The page is designed to fill the target exactly (section 4.5).
-        if (abs(frameW - targetW) > SLACK_PX || abs(frameH - targetH) > SLACK_PX) {
-            val why = if (frameW < targetW || frameH < targetH) {
-                "frame SMALLER than target - broken layout; NEVER upscale (rule 2)"
-            } else {
-                "frame LARGER than target - detection or layout bug"
-            }
+        // Section 4.5 wanted the frame to fill the target exactly - but
+        // generated pages often ship a 16:9 frame SMALLER than the canvas on
+        // purpose (black wrapper outside the frame). That is frame-fittable
+        // via re-rasterization, not broken. Only a LARGER frame (or non-16:9,
+        // already rejected above) is a hard failure.
+        if (frameW > targetW + SLACK_PX || frameH > targetH + SLACK_PX) {
             return Result.Fail(
-                "frame is ${frameW}x${frameH}px but target is ${targetW}x${targetH}px - $why"
+                "frame is ${frameW}x${frameH}px but target is ${targetW}x${targetH}px - " +
+                    "frame LARGER than target - detection or layout bug"
+            )
+        }
+        if (frameW < targetW - SLACK_PX || frameH < targetH - SLACK_PX) {
+            return Result.Undersized(
+                Rect(left, top, right, bottom),
+                x, y, w, h, vw, vh,
+                "16:9 frame ${frameW}x${frameH}px in ${targetW}x${targetH}px canvas - frame-fitting"
             )
         }
 

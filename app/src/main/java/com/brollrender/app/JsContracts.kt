@@ -120,4 +120,21 @@ object JsContracts {
                    vw: vw, vh: vh };
         })()
     """.trimIndent()
+
+    // Generic webfont check: the generation prompt may deviate from the
+    // default Anton + IBM Plex Mono pairing. Every family actually requested
+    // via the page's Google Fonts <link> is checked - all must be loaded.
+    val FONTS_GENERIC_JS = """
+        (() => {
+          const fams = [];
+          document.querySelectorAll('link[href*="fonts.googleapis"]').forEach(l => {
+            (l.href.match(/family=[^&]+/g) || []).forEach(m => {
+              fams.push(decodeURIComponent(m.slice(7)).replace(/[+ ]/g, ' ').split(':')[0].trim());
+            });
+          });
+          const out = {};
+          fams.forEach(f => { out[f] = document.fonts.check('16px "' + f + '"'); });
+          return JSON.stringify({ families: fams, checks: out });
+        })()
+    """.trimIndent()
 }
