@@ -56,6 +56,7 @@ class MainActivity : Activity() {
     private var resW = 1920
     private var resH = 1080
     private var fps = 30
+    private var bitRate = 16_000_000 // Mbps x 1e6 - user-adjustable on preview
 
     // PREVIEW state
     private var htmlFile: File? = null
@@ -206,10 +207,12 @@ class MainActivity : Activity() {
                 "FINAL" to {
                     resRow.select(0); resW = 1920; resH = 1080
                     fpsRow.select(0); fps = 30
+                    bitRate = 16_000_000
                 },
                 "DRAFT" to {
                     resRow.select(1); resW = 1280; resH = 720
                     fpsRow.select(1); fps = 24
+                    bitRate = 8_000_000
                 }
             ),
             if (resW == 1920 && fps == 30) 0 else 1
@@ -354,37 +357,104 @@ class MainActivity : Activity() {
             setPadding(pad, pad, pad, pad)
         }
 
-        // The app's OWN overlay (section 4.6): amber corner brackets, rect
-        // outline and crosshair at the scaled detection, drawn in Kotlin on
-        // top of the t=0 thumbnail - proof the corners were found before the
-        // user burns 5 minutes.
-        col.addView(ImageView(this).apply {
-            setImageBitmap(drawDetectionOverlay(p))
-            adjustViewBounds = true
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-        })
+        // FRAMING: AUTO = detected DOM frame (spec section 4); MANUAL =
+        // pinch/drag zoom+pan in a ZoomView whose brackets are the output
+        // frame (WYSIWYG). Defaults to MANUAL when detection failed, so
+        // arbitrary HTML still records.
+        var manual = p.manualRecommended
+        var zoom: ZoomTransform? = null
+        val frameHolder = LinearLayout(this)
+        val statusLock = monoTv("FRAME ${resW}x${resH}", 13, AMBER, true)
+
+        fun rebuildFrame() {
+            frameHolder.removeAllViews()
+            if (manual) {
+                frameHolder.addView(
+                    ZoomView(this, p.thumb, zoom).apply {
+                        onTransform = { zoom = it }
+                        layoutParams = LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT
+                        )
+                    }
+                )
+                statusLock.text = "FRAME ${resW}x${resH} · MANUAL · pinch/drag · dbl-tap reset"
+            } else {
+                frameHolder.addView(ImageView(this).apply {
+                    setImageBitmap(drawDetectionOverlay(p))
+                    adjustViewBounds = true
+                    layoutParams = LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    )
+                })
+                statusLock.text =
+                    "FRAME ${resW}x${resH} · LOCKED · CORNERS ±${p.cornerDeviationPx}px"
+            }
+        }
+
+        col.addView(frameHolder)
         col.addView(spacer(dp(6)))
-        col.addView(
-            monoTv(
-                "FRAME ${resW}x${resH} · LOCKED · CORNERS ±${p.cornerDeviationPx}px",
-                13, AMBER, true
-            )
-        )
+        col.addView(statusLock)
+        p.note?.let { col.addView(monoTv("detection: $it", 11, AMBER)) }
         col.addView(spacer(dp(8)))
         col.addView(monoTv("animations locked: ${p.animCount}", 12, TXT2))
-        col.addView(
-            monoTv(
-                if (p.fontsLoaded) "fonts: OK (anton + plex)"
-                else "fonts: TIMEOUT WARNING - look may differ",
-                12,
-                if (p.fontsLoaded) TXT2 else AMBER
-            )
-        )
+        when {
+            p.fontsWarning != null -> col.addView(monoTv("fonts: ${p.fontsWarning}", 12, AMBER))
+            p.fontsLoaded -> col.addView(monoTv("fonts: OK (anton + plex)", 12, TXT2))
+            else -> col.addView(monoTv("fonts: TIMEOUT WARNING - look may differ", 12, AMBER))
+        }
         col.addView(monoTv("detected timeline: ${p.durationMs / 1000.0} s", 12, TXT2))
         col.addView(spacer(dp(10)))
+
+        if (p.cornerDeviationPx >= 0) {
+            col.addView(monoTv("FRAMING", 11, TXT2))
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            val bAuto = mkButton("AUTO")
+            val bManual = mkButton("MANUAL")
+            fun syncToggle() {
+                styleButton(bAuto, !manual)
+                styleButton(bManual, manual)
+            }
+            bAuto.setOnClickListener {
+                manual = false
+                zoom = null
+                syncToggle()
+                rebuildFrame()
+            }
+            bManual.setOnClickListener {
+                manual = true
+                syncToggle()
+                rebuildFrame()
+            }
+            syncToggle()
+            row.addView(bAuto, LinearLayout.LayoutParams(0, dp(40), 1f))
+            row.addView(
+                bManual,
+                LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginStart = dp(6) }
+            )
+            col.addView(row)
+            col.addView(spacer(dp(10)))
+        }
+
+        // FPS + bitrate (peak customization; the lossless speed levers are
+        // fps and resolution - less work per output second, same per-frame
+        // quality). Bitrate trades file size only, above ~8M for 720p /
+        // ~16M for 1080p it is visually transparent.
+        toggleRow(
+            col, "FPS",
+            listOf("24" to { fps = 24 }, "30" to { fps = 30 }, "60" to { fps = 60 }),
+            if (fps == 24) 0 else if (fps == 30) 1 else 2
+        )
+        toggleRow(
+            col, "BITRATE",
+            listOf(
+                "8M" to { bitRate = 8_000_000 },
+                "16M" to { bitRate = 16_000_000 },
+                "24M" to { bitRate = 24_000_000 }
+            ),
+            if (bitRate == 8_000_000) 0 else if (bitRate == 24_000_000) 2 else 1
+        )
 
         // Duration: auto-detected, editable, clamped to 5-600 s on start.
         col.addView(monoTv("DURATION (s)", 11, TXT2))
@@ -406,12 +476,14 @@ class MainActivity : Activity() {
             )
             setOnClickListener {
                 val secs = dur.text.toString().toIntOrNull() ?: 5
-                startRender(p, secs.coerceIn(5, 600))
+                val zv = if (manual) (zoom ?: ZoomTransform(1f, 0f, 0f)) else null
+                startRender(p, secs.coerceIn(5, 600), zv)
             }
         })
         col.addView(spacer(dp(8)))
         col.addView(mkButton("BACK").apply { setOnClickListener { showPickScreen() } })
 
+        rebuildFrame()
         showScreen(android.widget.ScrollView(this).apply { addView(col) })
     }
 
@@ -462,7 +534,11 @@ class MainActivity : Activity() {
         return bmp
     }
 
-    private fun startRender(p: RenderEngine.PrepareResult.Ok, durationSec: Int) {
+    private fun startRender(
+        p: RenderEngine.PrepareResult.Ok,
+        durationSec: Int,
+        zoom: ZoomTransform?
+    ) {
         cancelRequested = false
         rendering = true
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -547,8 +623,8 @@ class MainActivity : Activity() {
         durationSec: Int
     ): RenderEngine.RenderOutcome {
         val total = durationSec * fps
-        // Section 6: 16 Mbps final (1080p), 8 Mbps draft (720p).
-        val bitRate = if (resW >= 1920) 16_000_000 else 8_000_000
+        // Section 6 baseline (16 Mbps final / 8 Mbps draft) is now the default
+        // of a user-adjustable field set on the preview screen.
         val out = File(cacheDir, "render_tmp.mp4")
         tempOutput = out
         return engine.render(
@@ -557,6 +633,7 @@ class MainActivity : Activity() {
             totalFrames = total,
             outputFile = out,
             bitRate = bitRate,
+            zoom = zoom,
             onProgress = { f, t, rate, eta ->
                 runOnUiThread { updateRenderProgress(f, t, rate, eta) }
             },

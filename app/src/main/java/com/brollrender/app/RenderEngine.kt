@@ -39,10 +39,13 @@ class RenderEngine(private val activity: Activity) {
         data class Ok(
             val thumb: Bitmap,
             val frameRect: Rect,
-            val cornerDeviationPx: Int,
+            val cornerDeviationPx: Int, // -1 = manual mode (no DOM detection)
             val animCount: Int,
             val durationMs: Long,
-            val fontsLoaded: Boolean // false = fonts.status never reached 'loaded' within 30 s
+            val fontsLoaded: Boolean, // false = fonts.status never reached 'loaded' within 30 s
+            val manualRecommended: Boolean = false, // detection failed -> manual framing
+            val note: String? = null,               // why (e.g. FRAME_NOT_FOUND detail)
+            val fontsWarning: String? = null        // webfont mismatch (warning, not abort)
         ) : PrepareResult()
 
         data class Fail(val message: String) : PrepareResult()
@@ -202,16 +205,17 @@ class RenderEngine(private val activity: Activity) {
                 }
                 Thread.sleep(200)
             }
+            var fontsWarning: String? = null
             if (fontsLoaded) {
                 val rawChk = evalJs(web, JsContracts.FONTS_CHECK_JS)
                 val chk = parseJsonObject(rawChk)
-                    ?: return PrepareResult.Fail(
-                        "fonts check returned: ${rawChk?.take(120) ?: "nothing"}"
-                    )
-                if (!chk.optBoolean("anton") || !chk.optBoolean("plex")) {
-                    return PrepareResult.Fail(
-                        "webfonts not loaded - allow internet once (first render fetches Google Fonts)"
-                    )
+                if (chk == null) {
+                    fontsWarning = "fonts check unreadable - look may differ"
+                } else if (!chk.optBoolean("anton") || !chk.optBoolean("plex")) {
+                    // Warning, not abort: the app now renders arbitrary HTML,
+                    // which may not use Anton / IBM Plex Mono at all.
+                    fontsWarning =
+                        "webfonts not loaded - allow internet once (look may differ)"
                 }
             }
 
@@ -219,16 +223,17 @@ class RenderEngine(private val activity: Activity) {
             // (pitfall 7.11).
             evalJs(web, JsContracts.HEADLESS_JS)
 
-            // Detection (section 4) - DOM geometry, never vision.
+            // Detection (section 4) - DOM geometry, never vision. A failed
+            // detection no longer aborts: it falls back to MANUAL framing
+            // (user zoom/pan, full-canvas 1:1 capture) so arbitrary HTML still
+            // records. What still gates: capability, page load, >= 1 animation.
             val det = FrameDetector.detect(
                 targetW,
                 targetH,
                 evalJs(web, JsContracts.DETECT_FRAME_JS)
             )
-            val ok = when (det) {
-                is FrameDetector.Result.Fail -> return PrepareResult.Fail(det.message)
-                is FrameDetector.Result.Ok -> det
-            }
+            val ok = det as? FrameDetector.Result.Ok
+            val manualNote = (det as? FrameDetector.Result.Fail)?.message
 
             // Duration (5.6) + PAUSE (5.7).
             val durationMs =
@@ -256,11 +261,14 @@ class RenderEngine(private val activity: Activity) {
 
             return PrepareResult.Ok(
                 thumb,
-                ok.rect,
-                ok.cornerDeviationPx,
+                ok?.rect ?: Rect(0, 0, targetW, targetH),
+                ok?.cornerDeviationPx ?: -1,
                 animCount,
                 Math.round(durationMs),
-                fontsLoaded
+                fontsLoaded,
+                manualRecommended = ok == null,
+                note = manualNote,
+                fontsWarning = fontsWarning
             )
         } catch (e: Exception) {
             return PrepareResult.Fail("prepare failed: ${e.message}")
@@ -280,6 +288,7 @@ class RenderEngine(private val activity: Activity) {
         totalFrames: Int,
         outputFile: File,
         bitRate: Int,
+        zoom: ZoomTransform? = null,
         onProgress: (frameNo: Int, total: Int, rateFps: Double, etaSec: Long) -> Unit,
         isCancelled: () -> Boolean
     ): RenderOutcome {
@@ -298,6 +307,14 @@ class RenderEngine(private val activity: Activity) {
             encoder.start()
             val surface = encoder.inputSurface
                 ?: throw RuntimeException("encoder produced no input surface")
+
+            if (zoom != null) {
+                // Manual framing: the CSS transform re-rasterizes content at
+                // the zoomed size - never a bitmap upscale of the capture
+                // (rule 2 intact). Style recalc settles before frame 0's draw.
+                evalJs(web, JsContracts.zoomJs(zoom.scale, zoom.panNx, zoom.panNy))
+                Thread.sleep(150)
+            }
 
             for (f in 0 until totalFrames) {
                 if (isCancelled()) {

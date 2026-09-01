@@ -74,4 +74,26 @@ object JsContracts {
 
     fun seekJs(ms: Double): String =
         SEEK_TEMPLATE.format(String.format(java.util.Locale.US, "%.3f", ms))
+
+    // Manual framing (peak customization): CSS transform on <html>, origin
+    // 0 0. SCALE = zoom factor; PNX/PNY = normalized pan fractions of the
+    // viewport, converted to CSS px inside the page. Content re-rasterizes
+    // at the new scale - crisp, never a bitmap upscale of the capture.
+    // Locale.US formatting is load-bearing (comma decimals are JS errors).
+    private val ZOOM_TEMPLATE = """
+        (() => {
+          const vw = document.documentElement.clientWidth;
+          const vh = document.documentElement.clientHeight;
+          const el = document.documentElement;
+          el.style.transformOrigin = '0 0';
+          el.style.transform =
+              'translate(' + (PNX * vw) + 'px,' + (PNY * vh) + 'px) scale(' + SCALE + ')';
+        })()
+    """.trimIndent()
+
+    fun zoomJs(scale: Float, panNx: Float, panNy: Float): String =
+        ZOOM_TEMPLATE
+            .replace("PNX", String.format(java.util.Locale.US, "%.4f", panNx))
+            .replace("PNY", String.format(java.util.Locale.US, "%.4f", panNy))
+            .replace("SCALE", String.format(java.util.Locale.US, "%.4f", scale))
 }
