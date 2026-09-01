@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<title>BrollRender fixture - 60s</title>
+<style>
+/* BROLLRENDER TEMP FIXTURE - 60s, 6 shots, ZERO JS.
+   Built to the app contract: .fit 16:9 + .stage + .safe (top 75%),
+   container units, animation-fill-mode both, finite timeline settled
+   at 60s, body.cdp hides browser-only chrome.
+   Self-verifying: .pbar = linear 60s clock (fill == elapsed/60 at any
+   frame), MEGA-SLAM at t=16.2s, guides/vtag must vanish in renders. */
+:root{
+  --void:#0A0C10; --line:#232833; --ink:#F2F4F8;
+  --muted:#8A93A6; --acc:#FFB454; --acc2:#7CE0C3;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden;background:var(--void)}
+body{display:flex;align-items:center;justify-content:center;
+     font-family:'IBM Plex Mono',monospace;color:var(--ink)}
+.fit{aspect-ratio:16/9;width:min(100vw,calc(100vh*16/9));
+     container-type:size;position:relative;overflow:hidden;background:var(--void)}
+.stage{position:absolute;inset:0}
+.safe{position:absolute;inset:0 0 25% 0}
+/* ---- ambient floor (infinite loops: correct frozen at any timestamp) ---- */
+.grid{position:absolute;inset:0;opacity:0;
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),
+                   linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:14.2cqh 8cqh;animation:fade5 1.2s ease-out .1s both}
+.ticks{position:absolute;inset:2cqh;opacity:0;animation:fade1 1s ease-out .5s both}
+.ticks i{position:absolute;width:3cqh;height:3cqh;border:.3cqh solid var(--muted);opacity:.6}
+.ticks i:nth-child(1){top:0;left:0;border-right:0;border-bottom:0}
+.ticks i:nth-child(2){top:0;right:0;border-left:0;border-bottom:0}
+.ticks i:nth-child(3){bottom:0;left:0;border-right:0;border-top:0}
+.ticks i:nth-child(4){bottom:0;right:0;border-left:0;border-top:0}
+.p{position:absolute;width:.7cqh;height:.7cqh;border-radius:50%;
+   background:var(--muted);opacity:.16;
+   animation:drift 13s ease-in-out infinite alternate}
+.p1{left:12%;top:30%;animation-delay:-2s}
+.p2{left:70%;top:20%;animation-delay:-6s}
+.p3{left:40%;top:62%;animation-duration:17s}
+.p4{left:85%;top:55%;animation-duration:11s}
+.pbar{position:absolute;left:0;top:0;height:.9cqh;width:0;background:var(--acc);
+      opacity:.9;animation:fill60 60s linear both}
+/* ---- shots: parent handles IN and OUT ---- */
+.shot{position:absolute;inset:0;display:flex;flex-direction:column;
+      align-items:center;justify-content:center;gap:3cqh;opacity:0;
+  animation-name:shotIn,shotOut;animation-duration:.8s,.9s;
+  animation-timing-function:cubic-bezier(.16,.9,.26,1),ease-in;
+  animation-fill-mode:both,both}
+.s1{animation-delay:.05s,9.1s}
+.s2{animation-delay:10.05s,19.1s}
+.s3{animation-delay:20.05s,29.1s}
+.s4{animation-delay:30.05s,39.1s}
+.s5{animation-delay:40.05s,49.1s}
+.s6{animation-delay:50.05s,59s;animation-duration:.8s,1s}
+/* ---- typography ---- */
+.big{font-family:Anton,sans-serif;font-size:13cqh;letter-spacing:.6cqh;
+     line-height:1.05;text-align:center}
+.a{color:var(--acc)}
+.lbl{font-size:1.9cqh;letter-spacing:.4cqh;color:var(--muted)}
+.word{position:relative;font-family:Anton,sans-serif;font-size:9cqh;color:var(--ink)}
+/* ---- element entrances (delays inline per element) ---- */
+.slamin{animation:slam .55s cubic-bezier(.2,1.35,.35,1) both}
+.risein{animation:rise .7s cubic-bezier(.16,.9,.26,1) both}
+.rule{width:38cqh;height:.6cqh;background:var(--acc);
+      transform:scaleX(0);transform-origin:left;
+      animation:grow .9s cubic-bezier(.45,.05,.4,1) both}
+.meters{display:flex;flex-direction:column;gap:1.6cqh}
+.meter{width:34cqh;height:1.5cqh;background:var(--acc);opacity:.85;
+       transform:scaleX(0);transform-origin:left;
+       animation:grow .9s cubic-bezier(.45,.05,.4,1) both}
+.m2{width:26cqh;background:var(--acc2)}
+.m3{width:19cqh;background:var(--muted)}
+.megawrap{position:relative;padding:1cqh}
+.ring{position:absolute;left:50%;top:50%;width:30cqh;height:30cqh;
+      margin:-15cqh 0 0 -15cqh;border:.5cqh solid var(--acc);border-radius:50%;
+      animation:burst .8s cubic-bezier(.16,.9,.26,1) both}
+.mega{position:relative;font-family:Anton,sans-serif;font-size:15cqh;color:var(--acc)}
+.ink{width:34cqh;height:17cqh;overflow:visible}
+.ink path{fill:none;stroke:var(--acc);stroke-width:2.2;stroke-linecap:round;
+          stroke-dasharray:1;stroke-dashoffset:1;
+          animation:draw 1.1s cubic-bezier(.45,.05,.4,1) both}
+.bars{display:flex;gap:2.2cqh;align-items:flex-end;height:20cqh}
+.bar{width:4cqh;background:var(--line);transform:scaleY(0);
+     transform-origin:bottom;
+     animation:risebar .8s cubic-bezier(.16,.9,.26,1) both}
+.needle{width:.5cqh;height:12cqh;background:var(--acc);
+        transform:rotate(-70deg);transform-origin:bottom;
+        animation:sweep 1.2s cubic-bezier(.2,1.35,.35,1) both}
+.tags{display:flex;gap:3cqh}
+.tag{font-family:Anton,sans-serif;font-size:3.6cqh;letter-spacing:.2cqh;
+     color:var(--void);background:var(--acc);padding:.7cqh 1.8cqh;
+     animation:stamp .5s cubic-bezier(.2,1.35,.35,1) both}
+.slash{position:absolute;left:-4%;top:52%;width:108%;height:.9cqh;
+       background:var(--acc2);transform:rotate(-5deg) scaleX(0);
+       transform-origin:left;
+       animation:slashk .45s cubic-bezier(.45,.05,.4,1) both}
+.wave{display:flex;gap:1cqh;align-items:center;height:8cqh}
+.wv{width:1.1cqh;height:3cqh;background:var(--muted);opacity:.4;
+    animation:pulse 1.7s ease-in-out infinite alternate}
+.wv:nth-child(2n){animation-duration:1.3s}
+.wv:nth-child(3n){animation-duration:2.2s}
+.mutedw{color:var(--muted)}
+.gonew{color:var(--acc2);font-size:11cqh}
+/* ---- browser-only chrome (must vanish under headless) ---- */
+.guides{position:absolute;inset:1.5cqh;pointer-events:none}
+.guides i{position:absolute;width:6cqh;height:6cqh;border:.5cqh solid var(--acc)}
+.guides i:nth-child(1){top:0;left:0;border-right:0;border-bottom:0}
+.guides i:nth-child(2){top:0;right:0;border-left:0;border-bottom:0}
+.guides i:nth-child(3){bottom:0;left:0;border-right:0;border-top:0}
+.guides i:nth-child(4){bottom:0;right:0;border-left:0;border-top:0}
+.vtag{position:absolute;right:2.2cqh;bottom:1.8cqh;font-size:1.7cqh;
+      letter-spacing:.3cqh;color:var(--muted)}
+body.cdp .guides,body.cdp .vtag{display:none!important}
+/* ---- keyframes ---- */
+@keyframes fade5{to{opacity:.5}}
+@keyframes fade1{to{opacity:1}}
+@keyframes drift{to{transform:translate(3cqh,-2cqh)}}
+@keyframes fill60{to{width:100%}}
+@keyframes shotIn{from{opacity:0}to{opacity:1}}
+@keyframes shotOut{to{opacity:0}}
+@keyframes slam{from{opacity:0;transform:scale(1.7)}to{opacity:1;transform:scale(1)}}
+@keyframes rise{from{opacity:0;transform:translateY(3cqh)}to{opacity:1;transform:none}}
+@keyframes grow{to{transform:scaleX(1)}}
+@keyframes draw{to{stroke-dashoffset:0}}
+@keyframes burst{from{opacity:.9;transform:scale(.2)}to{opacity:0;transform:scale(1)}}
+@keyframes slashk{to{transform:rotate(-5deg) scaleX(1)}}
+@keyframes risebar{to{transform:scaleY(1)}}
+@keyframes sweep{to{transform:rotate(55deg)}}
+@keyframes stamp{from{opacity:0;transform:scale(1.7) rotate(-9deg)}
+                 to{opacity:1;transform:scale(1) rotate(-3deg)}}
+@keyframes pulse{to{height:7cqh;opacity:.75}}
+</style>
+</head>
+<body>
+<div class="fit" id="video-frame">
+  <div class="stage">
+    <div class="grid"></div>
+    <div class="ticks"><i></i><i></i><i></i><i></i></div>
+    <div class="p p1"></div><div class="p p2"></div>
+    <div class="p p3"></div><div class="p p4"></div>
+    <div class="pbar"></div>
+    <div class="safe">
+      <section class="shot s1">
+        <div class="big slamin" style="animation-delay:.4s">BROLL<span class="a">RENDER</span></div>
+        <div class="rule" style="animation-delay:1.8s"></div>
+        <div class="lbl risein" style="animation-delay:2.6s">TEST FIXTURE · 60 SECONDS · ZERO JS</div>
+      </section>
+      <section class="shot s2">
+        <div class="lbl risein" style="animation-delay:10.4s">VALIDATION</div>
+        <div class="meters">
+          <div class="meter" style="animation-delay:10.8s"></div>
+          <div class="meter m2" style="animation-delay:11s"></div>
+          <div class="meter m3" style="animation-delay:11.2s"></div>
+        </div>
+        <div class="megawrap">
+          <div class="ring" style="animation-delay:16.2s"></div>
+          <div class="mega slamin" style="animation-delay:16.2s">PROOF?</div>
+        </div>
+        <div class="lbl risein" style="animation-delay:17.5s">MEGA-SLAM · T=16.2S</div>
+      </section>
+      <section class="shot s3">
+        <svg class="ink" viewBox="0 0 200 100">
+          <path pathLength="1" style="animation-delay:20.5s"
+                d="M100 8 C150 8 186 30 186 50 C186 82 140 92 100 92 C60 92 14 78 14 48 C14 22 60 6 100 10"/>
+          <path pathLength="1" style="animation-delay:22s" d="M150 86 L188 70"/>
+          <path pathLength="1" style="animation-delay:24.6s" d="M60 60 L140 60"/>
+        </svg>
+        <div class="word risein" style="animation-delay:23.4s">SCRUB-SAFE</div>
+      </section>
+      <section class="shot s4">
+        <div class="bars">
+          <div class="bar" style="animation-delay:30.4s;height:9cqh"></div>
+          <div class="bar" style="animation-delay:30.55s;height:14cqh"></div>
+          <div class="bar" style="animation-delay:30.7s;height:11cqh"></div>
+          <div class="bar" style="animation-delay:30.85s;height:18cqh"></div>
+          <div class="bar" style="animation-delay:31s;height:7cqh"></div>
+        </div>
+        <div class="lbl risein" style="animation-delay:32.4s">FRAME-EXACT TIMELINE</div>
+        <div class="needle" style="animation-delay:33.8s"></div>
+      </section>
+      <section class="shot s5">
+        <div class="tags">
+          <div class="tag" style="animation-delay:40.5s">OFFLINE</div>
+          <div class="tag" style="animation-delay:41.8s">1080P30</div>
+          <div class="tag" style="animation-delay:43.1s">ZERO-JS</div>
+        </div>
+        <div class="word risein mutedw" style="animation-delay:44.6s">BLUR<span class="slash" style="animation-delay:45.8s"></span></div>
+        <div class="word slamin gonew" style="animation-delay:46.9s">GONE.</div>
+      </section>
+      <section class="shot s6">
+        <div class="wave">
+          <div class="wv"></div><div class="wv"></div><div class="wv"></div>
+          <div class="wv"></div><div class="wv"></div><div class="wv"></div>
+          <div class="wv"></div><div class="wv"></div><div class="wv"></div>
+          <div class="wv"></div>
+        </div>
+        <div class="big risein" style="animation-delay:51.5s">RENDERED<span class="a">.</span></div>
+        <div class="lbl risein" style="animation-delay:53.2s">PIPELINE VERIFIED · SETTLES AT 60S</div>
+      </section>
+    </div>
+    <div class="guides"><i></i><i></i><i></i><i></i></div>
+    <div class="vtag">T60 · MEGA@16.2S · BROLLRENDER FIXTURE</div>
+  </div>
+</div>
+</body>
+</html>
