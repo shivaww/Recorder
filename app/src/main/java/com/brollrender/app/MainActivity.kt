@@ -461,7 +461,7 @@ class MainActivity : Activity() {
         col.addView(monoTv("animations locked: ${p.animCount}", 12, TXT2))
         when {
             p.fontsWarning != null -> col.addView(monoTv("fonts: ${p.fontsWarning}", 12, AMBER))
-            p.fontsLoaded -> col.addView(monoTv("fonts: OK (anton + plex)", 12, TXT2))
+            p.fontsLoaded -> col.addView(monoTv("fonts: OK (${p.fontsDetail ?: "anton + plex"})", 12, TXT2))
             else -> col.addView(monoTv("fonts: TIMEOUT WARNING - look may differ", 12, AMBER))
         }
         col.addView(monoTv("detected timeline: ${p.durationMs / 1000.0} s", 12, TXT2))

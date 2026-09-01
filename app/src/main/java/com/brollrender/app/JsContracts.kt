@@ -134,7 +134,34 @@ object JsContracts {
           });
           const out = {};
           fams.forEach(f => { out[f] = document.fonts.check('16px "' + f + '"'); });
-          return JSON.stringify({ families: fams, checks: out });
+          return JSON.stringify({ families: fams, checks: out,
+                                   status: document.fonts.status,
+                                   faces: document.fonts.size });
+        })()
+    """.trimIndent()
+
+    // Fonts kick: re-insert every Google Fonts <link> (a failed stylesheet
+    // fetch leaves no @font-face rules - re-inserting the element forces a
+    // retry through the normal loader) and explicitly document.fonts.load()
+    // each family - lazy font loads may never trigger on an offscreen,
+    // never-composited page. Fire-and-forget: the engine polls the checks.
+    val FONTS_KICK_JS = """
+        (() => {
+          document.querySelectorAll('link[href*="fonts.googleapis"]').forEach(l => {
+            const c = l.cloneNode();
+            l.parentNode.replaceChild(c, l);
+          });
+          const fams = [];
+          document.querySelectorAll('link[href*="fonts.googleapis"]').forEach(l => {
+            (l.href.match(/family=[^&]+/g) || []).forEach(m => {
+              fams.push(decodeURIComponent(m.slice(7)).replace(/[+ ]/g, ' ').split(':')[0].trim());
+            });
+          });
+          if (fams.length === 0) fams.push('Anton', 'IBM Plex Mono');
+          fams.forEach(f => {
+            try { document.fonts.load('16px "' + f + '"', 'AaBbCc123'); } catch (e) {}
+          });
+          return fams.length;
         })()
     """.trimIndent()
 }

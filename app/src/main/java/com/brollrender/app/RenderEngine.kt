@@ -49,6 +49,7 @@ class RenderEngine(private val activity: Activity) {
             val manualRecommended: Boolean = false, // detection failed -> manual framing
             val note: String? = null,               // why (e.g. FRAME_NOT_FOUND detail)
             val fontsWarning: String? = null,       // webfont mismatch (warning, not abort)
+            val fontsDetail: String? = null,        // families confirmed loaded (success)
             val suggestedZoom: ZoomTransform? = null // initial auto-fit (non-conforming pages)
         ) : PrepareResult()
 
@@ -198,46 +199,71 @@ class RenderEngine(private val activity: Activity) {
                 )
             }
 
-            // Fonts: poll status up to 30 s (timeout = warning, NOT a hard
-            // fail), then the hard check - fallback fonts mean the wrong look.
+            // Fonts - ACTIVE load, then poll the per-family checks.
+            // fonts.status alone is not trustworthy: it reads 'loaded' even
+            // when a face FAILED or never started (both observed in the
+            // field). So: (1) FONTS_KICK_JS re-inserts the Google Fonts
+            // <link> (failed CSS fetch = no @font-face rules at all) and
+            // explicitly document.fonts.load()s every family (lazy loads may
+            // never trigger on an offscreen page); (2) poll check() results
+            // for up to 45 s. Timeout = warning, NOT a hard fail.
+            evalJs(web, JsContracts.FONTS_KICK_JS)
             var fontsLoaded = false
-            val deadline = System.currentTimeMillis() + 30_000L
-            while (System.currentTimeMillis() < deadline) {
-                if ("\"loaded\"" == evalJs(web, JsContracts.FONTS_STATUS_JS)?.trim()) {
-                    fontsLoaded = true
-                    break
-                }
-                Thread.sleep(200)
-            }
+            var fontsDetail: String? = null
             var fontsWarning: String? = null
-            if (fontsLoaded) {
-                // Generic check first (generated pages may deviate from the
-                // default pairing): every family requested via the page's
-                // Google Fonts <link> must be loaded.
-                val rawGen = evalJs(web, JsContracts.FONTS_GENERIC_JS)
-                val gen = parseJsonObject(rawGen)
+            var lastFams: org.json.JSONArray? = null
+            var lastChecks: org.json.JSONObject? = null
+            val deadline = System.currentTimeMillis() + 45_000L
+            while (System.currentTimeMillis() < deadline) {
+                val gen = parseJsonObject(evalJs(web, JsContracts.FONTS_GENERIC_JS))
                 val fams = gen?.optJSONArray("families")
+                val checks = gen?.optJSONObject("checks")
                 if (fams != null && fams.length() > 0) {
-                    val checks = gen.optJSONObject("checks")
+                    lastFams = fams
+                    lastChecks = checks
+                    var missing = 0
+                    for (i in 0 until fams.length()) {
+                        if (checks == null || !checks.optBoolean(fams.optString(i))) missing++
+                    }
+                    if (missing == 0) {
+                        fontsLoaded = true
+                        break
+                    }
+                } else {
+                    // No fonts <link> parsed: default pairing fallback.
+                    val chk = parseJsonObject(evalJs(web, JsContracts.FONTS_CHECK_JS))
+                    if (chk != null && chk.optBoolean("anton") && chk.optBoolean("plex")) {
+                        fontsLoaded = true
+                        break
+                    }
+                }
+                Thread.sleep(300)
+            }
+            if (!fontsLoaded) {
+                // Build the failure warning from the LAST probe, with
+                // diagnostics: status + registered face count. faces=0 with a
+                // fonts <link> present means the stylesheet itself never
+                // parsed - a different failure than a slow font fetch.
+                val fams = lastFams
+                if (fams != null && fams.length() > 0) {
                     val missing = mutableListOf<String>()
                     for (i in 0 until fams.length()) {
                         val fam = fams.optString(i)
-                        if (checks == null || !checks.optBoolean(fam)) missing.add(fam)
+                        if (lastChecks == null || !lastChecks.optBoolean(fam)) missing.add(fam)
                     }
-                    if (missing.isNotEmpty()) {
-                        fontsWarning =
-                            "webfonts not loaded: ${missing.joinToString(", ")} - " +
-                                "allow internet once (look may differ)"
-                    }
+                    val gen = parseJsonObject(evalJs(web, JsContracts.FONTS_GENERIC_JS))
+                    fontsWarning =
+                        "webfonts not loaded: ${missing.joinToString(", ")} " +
+                            "(status=${gen?.optString("status") ?: "?"}, " +
+                            "faces=${gen?.optInt("faces", -1)}) - " +
+                            "allow internet once (look may differ)"
                 } else {
-                    // No fonts <link> parsed: fall back to the default pairing.
-                    val chk = parseJsonObject(evalJs(web, JsContracts.FONTS_CHECK_JS))
-                    if (chk == null) {
-                        fontsWarning = "fonts check unreadable - look may differ"
-                    } else if (!chk.optBoolean("anton") || !chk.optBoolean("plex")) {
-                        fontsWarning =
-                            "webfonts not loaded - allow internet once (look may differ)"
-                    }
+                    fontsWarning =
+                        "webfonts not loaded - allow internet once (look may differ)"
+                }
+            } else {
+                fontsDetail = lastFams?.let { f ->
+                    (0 until f.length()).joinToString(", ") { f.optString(it) }
                 }
             }
 
@@ -318,6 +344,7 @@ class RenderEngine(private val activity: Activity) {
                 manualRecommended = ok == null,
                 note = manualNote,
                 fontsWarning = fontsWarning,
+                fontsDetail = fontsDetail,
                 suggestedZoom = suggestedZoom
             )
         } catch (e: Exception) {
