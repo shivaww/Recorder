@@ -6,6 +6,7 @@ import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.view.Surface
 import java.io.File
+import java.nio.ByteBuffer
 
 /**
  * Spec section 6 - H.264 surface-input encoder + MPEG-4 muxer.
@@ -22,7 +23,9 @@ class VideoEncoder(
     private val height: Int,
     private val fps: Int,
     private val bitRate: Int,
-    outputFile: File
+    outputFile: File,
+    private val audioFormat: MediaFormat? = null,
+    private val audioSamples: List<AudioEncoder.Sample> = emptyList()
 ) {
     private lateinit var codec: MediaCodec
     private lateinit var muxer: MediaMuxer
@@ -34,6 +37,7 @@ class VideoEncoder(
         private set
 
     private var trackIndex = -1
+    private var audioTrackIndex = -1
     private var muxerStarted = false
     private var wroteAnySample = false
     private var codecStarted = false
@@ -77,9 +81,28 @@ class VideoEncoder(
                 }
                 idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                     check(!muxerStarted) { "encoder changed output format twice" }
-                    trackIndex = muxer.addTrack(codec.outputFormat)
-                    muxer.start()
-                    muxerStarted = true
+                    if (audioFormat != null && audioSamples.isNotEmpty()) {
+                        // Two tracks: BOTH must be added before start(). The
+                        // audio was fully encoded up front (Sfx.mix ->
+                        // AudioEncoder.encode), so its track goes in first,
+                        // then video, then start, then the buffered audio
+                        // samples (own PTS, same master clock as video).
+                        audioTrackIndex = muxer.addTrack(audioFormat)
+                        trackIndex = muxer.addTrack(codec.outputFormat)
+                        muxer.start()
+                        muxerStarted = true
+                        for (s in audioSamples) {
+                            val buf = ByteBuffer.wrap(s.data)
+                            val ai = MediaCodec.BufferInfo()
+                            ai.set(0, s.data.size, s.ptsUs, 0)
+                            muxer.writeSampleData(audioTrackIndex, buf, ai)
+                            wroteAnySample = true
+                        }
+                    } else {
+                        trackIndex = muxer.addTrack(codec.outputFormat)
+                        muxer.start()
+                        muxerStarted = true
+                    }
                 }
                 idx >= 0 -> {
                     if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
