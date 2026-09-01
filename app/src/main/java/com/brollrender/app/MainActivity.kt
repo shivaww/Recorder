@@ -376,6 +376,7 @@ class MainActivity : Activity() {
         val zoomLabel = monoTv("zoom 100% · pan +0.0% +0.0%", 11, TXT2)
         var zoomView: ZoomView? = null
         var enhanceOn = false
+        var sfxOn = p.sfxEvents.isNotEmpty()
         val btnFull = mkButton("FULL")
         val btnCenter = mkButton("CENTER")
         val btnCrop = mkButton("CROP")
@@ -459,6 +460,9 @@ class MainActivity : Activity() {
         p.note?.let { col.addView(monoTv("detection: $it", 11, AMBER)) }
         col.addView(spacer(dp(8)))
         col.addView(monoTv("animations locked: ${p.animCount}", 12, TXT2))
+        if (p.sfxEvents.isNotEmpty()) {
+            col.addView(monoTv("sfx: ${p.sfxEvents.size} events declared", 12, TXT2))
+        }
         when {
             p.fontsWarning != null -> col.addView(monoTv("fonts: ${p.fontsWarning}", 12, AMBER))
             p.fontsLoaded -> col.addView(monoTv("fonts: OK (${p.fontsDetail ?: "anton + plex"})", 12, TXT2))
@@ -517,6 +521,19 @@ class MainActivity : Activity() {
             if (bitRate == 8_000_000) 0 else if (bitRate == 24_000_000) 2 else 1
         )
 
+        // SFX: synthesized sound baked into the MP4's audio track when
+        // the page declares events (data-only #sfx manifest - PROMPT_SPEC).
+        if (p.sfxEvents.isNotEmpty()) {
+            toggleRow(
+                col, "SFX",
+                listOf(
+                    "OFF" to { sfxOn = false },
+                    "ON" to { sfxOn = true }
+                ),
+                if (sfxOn) 1 else 0
+            )
+        }
+
         // ENHANCE: honest naming - a fast native ColorMatrix color grade
         // (contrast ~1.12 around mid-gray + saturation 1.18), not an AI model
         // (zero-dependency app, nothing bundled, nothing uploaded). Pops soft
@@ -552,7 +569,7 @@ class MainActivity : Activity() {
             setOnClickListener {
                 val secs = dur.text.toString().toIntOrNull() ?: 5
                 val zv = if (manual) (zoom ?: ZoomTransform(1f, 0f, 0f)) else null
-                startRender(p, secs.coerceIn(5, 600), zv, enhanceOn)
+                startRender(p, secs.coerceIn(5, 600), zv, enhanceOn, sfxOn)
             }
         })
         col.addView(spacer(dp(8)))
@@ -613,14 +630,15 @@ class MainActivity : Activity() {
         p: RenderEngine.PrepareResult.Ok,
         durationSec: Int,
         zoom: ZoomTransform?,
-        enhance: Boolean
+        enhance: Boolean,
+        sfxOn: Boolean
     ) {
         cancelRequested = false
         rendering = true
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         showRenderScreen(durationSec)
         renderThread = Thread {
-            val outcome = runRenderJob(p, durationSec, zoom, enhance)
+            val outcome = runRenderJob(p, durationSec, zoom, enhance, sfxOn)
             rendering = false
             runOnUiThread {
                 window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -698,7 +716,8 @@ class MainActivity : Activity() {
         p: RenderEngine.PrepareResult.Ok,
         durationSec: Int,
         zoom: ZoomTransform?,
-        enhance: Boolean
+        enhance: Boolean,
+        sfxOn: Boolean
     ): RenderEngine.RenderOutcome {
         val total = durationSec * fps
         // Section 6 baseline (16 Mbps final / 8 Mbps draft) is now the default
@@ -713,6 +732,7 @@ class MainActivity : Activity() {
             bitRate = bitRate,
             zoom = zoom,
             enhance = enhance,
+            sfxEvents = if (sfxOn) p.sfxEvents else emptyList(),
             onProgress = { f, t, rate, eta ->
                 runOnUiThread { updateRenderProgress(f, t, rate, eta) }
             },

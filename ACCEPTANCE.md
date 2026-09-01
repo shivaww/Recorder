@@ -27,5 +27,6 @@ Run against any HTML file (conforming files auto-detect the frame; non-conformin
 | 14 | ENHANCE ON vs OFF: first frame visibly more contrast/saturation ON; frame0.png still matches the video | | |
 | 15 | No screen capture: let a notification arrive mid-render (or take a screenshot) - none of it appears in the output video | | |
 | 16 | Non-conforming page opens AUTO-FITTED: content fills the amber brackets (status line shows `MANUAL · AUTO-FITTED`), matching a manual screen-recording's framing - NOT small in a dark void | | |
+| 17 | SFX variant (`temporary_sfx.html`): MP4 has an audible audio track; the slam lands exactly with the 16.2s MEGA-SLAM (audio/video sync) | | |
 
 Every FAIL gets a one-line note: what was seen vs what was expected, and at which screen (PICK/PREVIEW/RENDER/DONE). Update this file in the repo after each run - the checklist is the definition of done.

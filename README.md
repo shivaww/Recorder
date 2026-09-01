@@ -11,7 +11,7 @@ The repo commits `debug.keystore`, so every rebuild is signed identically and in
 ## Use
 
 1. **PICK** - CHOOSE HTML (system file picker, `text/html`), resolution 480p/720p/1080p, FPS and MODE presets (MODE snaps resolution + fps + bitrate together).
-2. **PREVIEW** - FRAMING: AUTO (amber brackets lock the DOM-detected 16:9 frame) or MANUAL (pinch/drag zoom+pan, editor-style CROP with draggable corner handles + thirds grid, FULL/CENTER presets - what is inside the brackets is exactly what gets recorded). Settings: FPS 24/30/60, BITRATE 8/16/24 Mbps, ENHANCE OFF/ON, editable duration (5-600 s).
+2. **PREVIEW** - FRAMING: AUTO (amber brackets lock the DOM-detected 16:9 frame) or MANUAL (pinch/drag zoom+pan, editor-style CROP with draggable corner handles + thirds grid, FULL/CENTER presets - what is inside the brackets is exactly what gets recorded). Settings: FPS 24/30/60, BITRATE 8/16/24 Mbps, ENHANCE OFF/ON, SFX OFF/ON (when the page declares #sfx events), editable duration (5-600 s).
 3. **RENDER** - progress bar with `frame N/T - r f/s - ETA`; CANCEL aborts cleanly (encoder released, partial file deleted).
 4. **DONE** - file card read back with MediaMetadataRetriever: name, size, duration, resolution, VERIFIED/MISMATCH line. OPEN / SHARE / RENDER ANOTHER.
 

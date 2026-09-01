@@ -40,7 +40,7 @@ Optional belt-and-suspenders (NOT required - frame-fit already handles it): make
     .fit { aspect-ratio:16/9; container-type:size; overflow:hidden;
            width:100vw; max-width:177.78vh; margin:0 auto; }
 
-## SFX - declarative sound effects (app support in progress)
+## SFX - declarative sound effects (supported)
 
 The renderer can bake synthesized SFX into the MP4's audio track. To opt in, every generated file carries a DATA-ONLY manifest (not logic - the zero-JS rule is untouched):
 

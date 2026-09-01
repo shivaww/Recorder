@@ -16,6 +16,7 @@ import android.webkit.WebViewClient
 import org.json.JSONObject
 import org.json.JSONTokener
 import kotlin.math.min
+import android.media.MediaFormat
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -50,6 +51,7 @@ class RenderEngine(private val activity: Activity) {
             val note: String? = null,               // why (e.g. FRAME_NOT_FOUND detail)
             val fontsWarning: String? = null,       // webfont mismatch (warning, not abort)
             val fontsDetail: String? = null,        // families confirmed loaded (success)
+            val sfxEvents: List<Sfx.Event> = emptyList(), // declarative #sfx manifest events
             val suggestedZoom: ZoomTransform? = null // initial auto-fit (non-conforming pages)
         ) : PrepareResult()
 
@@ -293,6 +295,28 @@ class RenderEngine(private val activity: Activity) {
                 return PrepareResult.Fail("0 animations locked - nothing to render")
             }
 
+            // SFX manifest (declarative audio): the data-only #sfx JSON
+            // block, on the same timeline as animation-delay.
+            var sfxEvents: List<Sfx.Event> = emptyList()
+            val sfxObj = parseJsonObject(evalJs(web, JsContracts.SFX_MANIFEST_JS))
+            val sfxArr = sfxObj?.optJSONArray("events")
+            if (sfxArr != null) {
+                val evs = mutableListOf<Sfx.Event>()
+                for (i in 0 until sfxArr.length()) {
+                    val e = sfxArr.optJSONObject(i) ?: continue
+                    val t = e.optDouble("t", -1.0)
+                    if (t < 0.0) continue
+                    evs.add(
+                        Sfx.Event(
+                            t,
+                            e.optString("id", "tick"),
+                            e.optDouble("gain", 0.7).toFloat().coerceIn(0f, 1f)
+                        )
+                    )
+                }
+                sfxEvents = evs
+            }
+
             // Auto-fit for non-conforming pages (qwen video-audit verdict:
             // ~2.9x observed vs ~2.75x density prediction): phone-authored
             // pages render small in the WebView's CSS viewport. Contain-fit
@@ -345,6 +369,7 @@ class RenderEngine(private val activity: Activity) {
                 note = manualNote,
                 fontsWarning = fontsWarning,
                 fontsDetail = fontsDetail,
+                sfxEvents = sfxEvents,
                 suggestedZoom = suggestedZoom
             )
         } catch (e: Exception) {
@@ -425,6 +450,7 @@ class RenderEngine(private val activity: Activity) {
         bitRate: Int,
         zoom: ZoomTransform? = null,
         enhance: Boolean = false,
+        sfxEvents: List<Sfx.Event> = emptyList(),
         onProgress: (frameNo: Int, total: Int, rateFps: Double, etaSec: Long) -> Unit,
         isCancelled: () -> Boolean
     ): RenderOutcome {
@@ -457,7 +483,18 @@ class RenderEngine(private val activity: Activity) {
                 blit.colorFilter = ColorMatrixColorFilter(cm)
             }
 
-            encoder = VideoEncoder(w, h, fps, bitRate, outputFile)
+            // SFX: mix + AAC-encode the full timeline BEFORE the frame
+            // loop. Both tracks then derive PTS from the same master clock -
+            // sync by construction. Pages without events stay video-only.
+            var audioFormat: MediaFormat? = null
+            var audioSamples: List<AudioEncoder.Sample> = emptyList()
+            if (sfxEvents.isNotEmpty()) {
+                val pcm = Sfx.mix(sfxEvents, totalFrames.toDouble() / fps)
+                val encoded = AudioEncoder().encode(pcm)
+                audioFormat = encoded.format
+                audioSamples = encoded.samples
+            }
+            encoder = VideoEncoder(w, h, fps, bitRate, outputFile, audioFormat, audioSamples)
             encoder.start()
             val surface = encoder.inputSurface
                 ?: throw RuntimeException("encoder produced no input surface")
