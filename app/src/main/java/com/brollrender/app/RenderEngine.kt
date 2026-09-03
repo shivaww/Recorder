@@ -25,11 +25,19 @@ import java.util.concurrent.TimeUnit
  * Spec section 5 - the offscreen render engine.
  *
  * The WebView is attached INVISIBLE (never GONE), manually measured and laid
- * out at the exact output pixel size, software-layered, and drawn manually
- * into a bitmap INSIDE the evaluateJavascript callback of each seek
- * (pitfalls 7.1-7.3). Driven from a worker thread; every WebView touch is
- * posted to the UI thread and latched back, so any deadlock converts into a
- * clean timeout abort (pitfall 7.13).
+ * out at the exact output pixel size, HARDWARE-layered (GPU compositing for
+ * full CSS filter/blend/canvas/WebGL support), and drawn manually into a
+ * bitmap INSIDE the evaluateJavascript callback of each seek (pitfalls
+ * 7.1-7.3). The seek JS forces synchronous style+layout flush
+ * (document.body.offsetHeight) so the draw captures the correct frame.
+ * Driven from a worker thread; every WebView touch is posted to the UI
+ * thread and latched back, so any deadlock converts into a clean timeout
+ * abort (pitfall 7.13).
+ *
+ * Two page modes:
+ *  - CSS-only: motion via CSS keyframes, scrubbed by getAnimations()
+ *  - Scrub-safe JS: page implements window.__broll = { seek(t), duration() }
+ *    for canvas/WebGL/dynamic effects. Both are scrubbed on the same clock.
  */
 class RenderEngine(private val activity: Activity) {
 
@@ -53,7 +61,11 @@ class RenderEngine(private val activity: Activity) {
             val fontsDetail: String? = null,        // families confirmed loaded (success)
             val sfxEvents: List<Sfx.Event> = emptyList(), // declarative #sfx manifest events
             val sfxLoudness: String? = null,               // page-declared loudness (low/normal/high)
-            val suggestedZoom: ZoomTransform? = null // initial auto-fit (non-conforming pages)
+            val suggestedZoom: ZoomTransform? = null, // initial auto-fit (non-conforming pages)
+            val isBrollJs: Boolean = false,          // page implements __broll scrub-safe JS
+            val brollWarning: String? = null,        // banned API usage detected (warning only)
+            val ambienceType: String? = null,        // page-declared ambience bed type
+            val ambienceGain: Float = 0.25f          // page-declared ambience gain
         ) : PrepareResult()
 
         data class Fail(val message: String) : PrepareResult()
@@ -144,8 +156,19 @@ class RenderEngine(private val activity: Activity) {
                 loadWithOverviewMode = false
                 textZoom = 100
                 cacheMode = WebSettings.LOAD_DEFAULT
+                domStorageEnabled = true
+                mediaPlaybackRequiresUserGesture = false
+                allowContentAccess = true
+                @Suppress("DEPRECATION")
+                allowFileAccessFromFileURLs = true
+                @Suppress("DEPRECATION")
+                allowUniversalAccessFromFileURLs = true
             }
-            web.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+            // HARDWARE layer: Chromium GPU compositor - enables CSS filters,
+            // mix-blend-mode, backdrop-filter, Canvas 2D GPU accel, WebGL.
+            // Capture via web.draw(softwareCanvas) triggers synchronous
+            // GPU->CPU readback; the seek JS forces reflow before draw.
+            web.setLayerType(View.LAYER_TYPE_HARDWARE, null)
             activity.addContentView(web, FrameLayout.LayoutParams(w, h))
             web.visibility = View.INVISIBLE
             web.measure(
@@ -288,12 +311,30 @@ class RenderEngine(private val activity: Activity) {
             val manualNote =
                 (det as? FrameDetector.Result.Fail)?.message ?: under?.message
 
+            // Scrub-safe JS detection: does the page implement __broll?
+            val brollInfo = parseJsonObject(evalJs(web, JsContracts.BROLL_DETECT_JS))
+            val isBrollJs = brollInfo?.optBoolean("seek") ?: false
+
+            // Validate: warn if banned time-dependent APIs are present.
+            var brollWarning: String? = null
+            val validation = parseJsonObject(evalJs(web, JsContracts.BROLL_VALIDATE_JS))
+            if (validation != null && !validation.optBoolean("clean", true)) {
+                val violations = validation.optJSONArray("violations")
+                val vList = mutableListOf<String>()
+                if (violations != null) {
+                    for (i in 0 until violations.length()) vList.add(violations.optString(i))
+                }
+                if (vList.isNotEmpty()) {
+                    brollWarning = "banned APIs found (will not scrub): ${vList.joinToString(", ")}"
+                }
+            }
+
             // Duration (5.6) + PAUSE (5.7).
             val durationMs =
                 evalJs(web, JsContracts.DURATION_JS)?.trim()?.toDoubleOrNull() ?: 0.0
             val animCount = evalJs(web, JsContracts.PAUSE_JS)?.trim()?.toIntOrNull() ?: 0
-            if (animCount <= 0) {
-                return PrepareResult.Fail("0 animations locked - nothing to render")
+            if (animCount <= 0 && !isBrollJs) {
+                return PrepareResult.Fail("0 animations locked and no __broll.seek - nothing to render")
             }
 
             // SFX manifest (declarative audio): the data-only #sfx JSON
@@ -317,6 +358,15 @@ class RenderEngine(private val activity: Activity) {
                     )
                 }
                 sfxEvents = evs
+            }
+
+            // Ambience manifest (background audio bed): type + gain.
+            var ambienceType: String? = null
+            var ambienceGain = 0.25f
+            val ambObj = parseJsonObject(evalJs(web, JsContracts.AMBIENCE_MANIFEST_JS))
+            if (ambObj != null && ambObj.optBoolean("present", false)) {
+                ambienceType = ambObj.optString("type", "drone")
+                ambienceGain = ambObj.optDouble("gain", 0.25).toFloat().coerceIn(0f, 1f)
             }
 
             // Auto-fit for non-conforming pages (qwen video-audit verdict:
@@ -373,7 +423,11 @@ class RenderEngine(private val activity: Activity) {
                 fontsDetail = fontsDetail,
                 sfxEvents = sfxEvents,
                 sfxLoudness = sfxLoudness,
-                suggestedZoom = suggestedZoom
+                suggestedZoom = suggestedZoom,
+                isBrollJs = isBrollJs,
+                brollWarning = brollWarning,
+                ambienceType = ambienceType,
+                ambienceGain = ambienceGain
             )
         } catch (e: Exception) {
             return PrepareResult.Fail("prepare failed: ${e.message}")
@@ -455,6 +509,8 @@ class RenderEngine(private val activity: Activity) {
         enhance: Boolean = false,
         sfxEvents: List<Sfx.Event> = emptyList(),
         sfxLoudness: String? = null,
+        ambienceType: String? = null,
+        ambienceGain: Float = 0.25f,
         textScale: Float = 1f,
         onProgress: (frameNo: Int, total: Int, rateFps: Double, etaSec: Long) -> Unit,
         isCancelled: () -> Boolean
@@ -493,11 +549,11 @@ class RenderEngine(private val activity: Activity) {
             // sync by construction. Pages without events stay video-only.
             var audioFormat: MediaFormat? = null
             var audioSamples: List<AudioEncoder.Sample> = emptyList()
-            if (sfxEvents.isNotEmpty()) {
+            if (sfxEvents.isNotEmpty() || ambienceType != null) {
                 // Audio prep is user-visible work: report the two stages so
                 // the pre-loop phase never reads as a hang (-1 / -2 codes).
                 onProgress(-1, totalFrames, 0.0, -1) // "AUDIO: mixing"
-                val pcm = Sfx.mix(sfxEvents, totalFrames.toDouble() / fps, sfxLoudness)
+                val pcm = Sfx.mix(sfxEvents, totalFrames.toDouble() / fps, sfxLoudness, ambienceType, ambienceGain)
                 onProgress(-2, totalFrames, 0.0, -1) // "AUDIO: encoding (aac)"
                 val encoded = AudioEncoder().encode(pcm)
                 audioFormat = encoded.format

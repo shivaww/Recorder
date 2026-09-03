@@ -174,14 +174,121 @@ object Sfx {
         else -> tick()
     }
 
+    // ===================== ambience beds =====================
+    // Continuous background audio synthesized for the full duration.
+    // Fades in over 1s, out over 2s. Mixed under SFX at declared gain.
+
+    /** Deep sustained pad with slow LFO - documentary, storytelling. */
+    private fun ambDrone(durationSec: Double): FloatArray {
+        val n = (durationSec * SAMPLE_RATE).toInt()
+        val out = FloatArray(n)
+        var ph1 = 0.0; var ph2 = 0.0; var phLfo = 0.0
+        for (i in 0 until n) {
+            val t = i.toDouble() / SAMPLE_RATE
+            val lfo = 0.6 + 0.4 * sin(TAU * 0.07 * t + phLfo) // very slow modulation
+            phLfo += TAU * 0.07 / SAMPLE_RATE
+            ph1 += TAU * 55.0 / SAMPLE_RATE
+            ph2 += TAU * 82.5 / SAMPLE_RATE
+            out[i] = ((sin(ph1) * 0.5 + sin(ph2) * 0.3 +
+                sin(ph1 * 2.01) * 0.15) * lfo * 0.4).toFloat()
+        }
+        return out
+    }
+
+    /** Soft rhythmic low throb ~70 BPM - podcast, listicle. */
+    private fun ambPulse(durationSec: Double): FloatArray {
+        val n = (durationSec * SAMPLE_RATE).toInt()
+        val out = FloatArray(n)
+        val beatSec = 60.0 / 70.0 // ~0.857s per beat
+        var ph = 0.0
+        for (i in 0 until n) {
+            val t = i.toDouble() / SAMPLE_RATE
+            val beatPhase = (t % beatSec) / beatSec
+            val env = exp(-beatPhase * 6.0) // sharp attack, soft decay
+            ph += TAU * 50.0 / SAMPLE_RATE
+            out[i] = (sin(ph) * env * 0.5).toFloat()
+        }
+        return out
+    }
+
+    /** Filtered noise, airy and spacious - explainer, study. */
+    private fun ambAir(durationSec: Double): FloatArray {
+        val n = (durationSec * SAMPLE_RATE).toInt()
+        val nz = noiseFor(99, n)
+        val out = FloatArray(n)
+        var lp = 0f; var lp2 = 0f
+        for (i in 0 until n) {
+            val t = i.toDouble() / SAMPLE_RATE
+            val mod = 0.7 + 0.3 * sin(TAU * 0.12 * t).toFloat() // slow breathing
+            lp += (nz[i] - lp) * 0.02f // heavy lowpass
+            lp2 += (lp - lp2) * 0.04f // second stage
+            out[i] = lp2 * mod * 0.6f
+        }
+        return out
+    }
+
+    /** Rising pad with slow build - news, thriller. */
+    private fun ambTension(durationSec: Double): FloatArray {
+        val n = (durationSec * SAMPLE_RATE).toInt()
+        val out = FloatArray(n)
+        var ph1 = 0.0; var ph2 = 0.0
+        for (i in 0 until n) {
+            val p = i.toDouble() / n // 0..1 progress
+            val f1 = 80.0 + 120.0 * p // rises 80->200 Hz
+            val f2 = f1 * 1.5 // fifth above
+            ph1 += TAU * f1 / SAMPLE_RATE
+            ph2 += TAU * f2 / SAMPLE_RATE
+            val amp = 0.2 + 0.3 * p // builds
+            out[i] = ((sin(ph1) * 0.5 + sin(ph2) * 0.3) * amp).toFloat()
+        }
+        return out
+    }
+
+    private fun ambienceBed(type: String, durationSec: Double): FloatArray {
+        val raw = when (type) {
+            "drone" -> ambDrone(durationSec)
+            "pulse" -> ambPulse(durationSec)
+            "air" -> ambAir(durationSec)
+            "tension" -> ambTension(durationSec)
+            else -> ambDrone(durationSec)
+        }
+        // Fade in 1s, fade out 2s
+        val fadeIn = min(SAMPLE_RATE, raw.size)
+        val fadeOut = min(2 * SAMPLE_RATE, raw.size)
+        for (i in 0 until fadeIn) {
+            raw[i] *= (i.toFloat() / fadeIn)
+        }
+        for (i in 0 until fadeOut) {
+            val idx = raw.size - 1 - i
+            raw[idx] *= (i.toFloat() / fadeOut)
+        }
+        return raw
+    }
+
     /**
-     * Mix all events onto one PCM timeline of [durationSec] seconds (plus a
-     * 0.25 s tail so the last decay is not cut). Soft-clip (x/(1+|x|)) keeps
-     * overlapping events from hard-distorting.
+     * Mix all events + optional ambience bed onto one PCM timeline of
+     * [durationSec] seconds (plus a 0.25 s tail so the last decay is not
+     * cut). Soft-clip (x/(1+|x|)) keeps overlapping events from
+     * hard-distorting.
      */
-    fun mix(events: List<Event>, durationSec: Double, loudness: String? = null): ShortArray {
+    fun mix(
+        events: List<Event>,
+        durationSec: Double,
+        loudness: String? = null,
+        ambienceType: String? = null,
+        ambienceGain: Float = 0.25f
+    ): ShortArray {
         val total = (durationSec * SAMPLE_RATE).toInt() + SAMPLE_RATE / 4
         val acc = FloatArray(total)
+
+        // Ambience bed first (under everything)
+        if (ambienceType != null) {
+            val bed = ambienceBed(ambienceType, durationSec)
+            val len = min(bed.size, total)
+            for (i in 0 until len) acc[i] += bed[i] * ambienceGain
+        }
+
+        // SFX events on top
         for (e in events) {
             val buf = synth(e.id)
             val start = (e.tSec * SAMPLE_RATE).toInt()

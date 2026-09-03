@@ -46,16 +46,45 @@ class VideoEncoder(
         val fmt = MediaFormat.createVideoFormat("video/avc", width, height).apply {
             setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
+            // 1s I-frame interval: better scrubbing in editors (CapCut,
+            // Premiere) without meaningful file-size cost at these bitrates.
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
             setInteger(
                 MediaFormat.KEY_COLOR_FORMAT,
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
+            )
+            // High Profile: better compression efficiency than Baseline/Main
+            // at the same bitrate. All devices with API 26+ support it.
+            setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileAVCHigh)
+            // VBR: quality-biased encoding. KEY_BIT_RATE becomes the ceiling;
+            // the encoder spends bits where motion/complexity demands them
+            // instead of spreading evenly. Ideal for motion graphics.
+            setInteger(
+                MediaFormat.KEY_BITRATE_MODE,
+                MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR
             )
         }
         // Surface-INPUT encoding: pass null as the output surface, then create
         // the input surface after configure (the only pattern the API allows).
         codec = MediaCodec.createEncoderByType("video/avc")
-        codec.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        try {
+            codec.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        } catch (e: Exception) {
+            // Fallback: some older encoders reject VBR/High Profile combo.
+            // Retry with CBR + default profile.
+            codec.release()
+            codec = MediaCodec.createEncoderByType("video/avc")
+            val fallback = MediaFormat.createVideoFormat("video/avc", width, height).apply {
+                setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
+                setInteger(MediaFormat.KEY_FRAME_RATE, fps)
+                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                setInteger(
+                    MediaFormat.KEY_COLOR_FORMAT,
+                    MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
+                )
+            }
+            codec.configure(fallback, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        }
         inputSurface = codec.createInputSurface()
         codec.start()
         codecStarted = true

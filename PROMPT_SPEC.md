@@ -1,65 +1,101 @@
-# PROMPT_SPEC - app-side companion to the generation prompt
+# PROMPT_SPEC — app-side companion to GENERATION_PROMPT
 
-The generation prompt (SRT + the motion-graphics-designer contract) is the source of truth for the HTML. This file documents what BrollRender does with that output - no competing prompt here.
+The generation prompt (SRT + VIDEO_TYPE + the motion-graphics contract) is the
+source of truth for the HTML. This file documents what BrollRender does with
+that output.
 
 ## The closed loop
 
-SRT (renamed .txt) + prompt -> AI emits one self-contained HTML (beat table, manifest, file) -> BrollRender: PICK -> PREVIEW -> RENDER -> DONE. The old fallback in the prompt's RECORD NOTE ("screen-record N seconds, crop to the corner brackets") is obsolete - the app replaced exactly that path, without the editor-crop resampling blur.
+SRT (renamed .txt) + VIDEO_TYPE + prompt → AI emits one self-contained HTML
+(beat table, manifest, file) → BrollRender: PICK (or PASTE HTML) → PREVIEW →
+RENDER → DONE. No screen recording, no editor crop, no resampling blur.
+
+## Two page modes
+
+1. **CSS-only**: all motion via CSS keyframes. The app freezes the clock via
+   `document.getAnimations()`, scrubs `currentTime` frame-by-frame.
+2. **Scrub-safe JS**: page implements `window.__broll = { seek(t), duration() }`.
+   The app calls `__broll.seek(tSec)` alongside the CSS scrub each frame.
+   Canvas 2D, WebGL, SVG DOM manipulation, video scrubbing — all supported.
+   Banned: setInterval, setTimeout, rAF, fetch, network, Audio/Video .play().
+   The app flags banned APIs as a warning (they're inert, not scrubbed).
 
 ## How the app frames the file (in order)
 
-1. `.fit` / `#video-frame` found and it fills the canvas (+-2 px) -> AUTO, LOCKED, corners verified on the preview.
-2. 16:9 frame found but SMALLER than the canvas (the black `.viewport` wrapper design) -> FRAME-FIT: the page is scaled so the frame fills the video. CSS re-rasterization - text and SVG strokes come out at full output resolution, never a resampled bitmap. Status line: MANUAL · AUTO-FITTED; still pinch/crop-adjustable.
-3. No frame at all -> content-bounds contain-fit.
-4. Any case -> MANUAL framing (pinch/drag, CROP handles, FULL/CENTER presets).
+1. `.fit` / `#video-frame` found and fills the canvas (±2 px) → AUTO, LOCKED.
+2. 16:9 frame found but SMALLER → FRAME-FIT: CSS re-rasterization scales it
+   to fill the video. Text/SVG at full output resolution, never bitmap upscale.
+3. No frame at all → content-bounds contain-fit.
+4. Any case → MANUAL framing (pinch/drag, CROP handles, FULL/CENTER presets).
+
+## Rendering pipeline (hardware-accelerated)
+
+- WebView: LAYER_TYPE_HARDWARE → Chromium GPU compositor.
+- Enables: CSS filters, mix-blend-mode, backdrop-filter, Canvas 2D GPU accel,
+  WebGL, 3D transforms.
+- Per frame: seek JS (forces synchronous reflow) → web.draw() → GPU→CPU
+  readback → blit to encoder surface → H.264 encode.
+- No screen capture. No network needed after first render (fonts + images cached).
+
+## Media loading
+
+- **URL images** (primary): `https://` URLs in <img> or canvas drawImage.
+  Loaded on first render (internet needed once), cached by WebView after.
+- **Local files**: `file:///` paths for user's own images/video clips.
+  WebView configured with allowFileAccessFromFileURLs + universal access.
+- **Video scrubbing**: `<video>` elements seek via `video.currentTime = t`
+  inside `__broll.seek(t)`. Never .play(). mediaPlaybackRequiresUserGesture=false.
 
 ## Fonts
 
-The app checks every family actually requested in the page's Google Fonts `<link>` - so "deviate for a strong episode identity" works; the FONTS manifest line stays as human QC, not a renderer requirement. First render needs internet once; the WebView caches after (airplane-mode-safe on the second run).
+Generic check: every family in the page's Google Fonts `<link>` is verified.
+Any pairing works. FONTS_KICK re-inserts links + explicit document.fonts.load().
+45s poll timeout = warning, not abort. First render needs internet; cached after.
 
-## Why the paused clock is safe with this prompt
+## Audio pipeline
 
-- `animation-fill-mode: both/forwards` + finite timeline -> DURATION_JS lands on the declared DUR (block length rounded up), editable on PREVIEW.
-- Infinite ambient loops are scrubbed but ignored for duration detection - exactly the ambient-floor rule.
-- Guides that "auto-hide at 3.5s" CANNOT auto-hide under the frozen clock - the headless rule (`body.cdp .guides {display:none}`, contract #4) is what actually removes them. Keep that rule in every file.
-- `pathLength="1"` stroke reveals scrub perfectly (dashoffset is a plain keyframe).
+- **SFX**: `#sfx` JSON block → 8 synthesized sounds (slam boom whoosh tick
+  rise ding pop glitch) → PCM mix → AAC encode → muxed on same master clock.
+- **Ambience**: `#ambience` JSON block → synthesized bed (drone/pulse/air/
+  tension) → fade in 1s, fade out 2s → mixed under SFX at declared gain.
+- Master gain 0.45 (-7 dBFS). Loudness multiplier: low=0.5, normal=1.0, high=1.6.
+- SFX VOLUME toggle in app: QUIET/NORMAL/LOUD overrides page declaration.
+
+## Encoding
+
+- H.264 AVC High Profile, VBR (quality-biased, bitrate = ceiling).
+- I-frame interval: 1s (editor-friendly scrubbing).
+- CBR fallback if device rejects VBR/High Profile.
+- Resolutions: 480p / 720p / 1080p. FPS: 24 / 30 / 60.
+- Bitrate options: 8 / 16 / 24 Mbps.
+- Audio: AAC 44.1kHz mono 96kbps.
+
+## TEXT scaling
+
+App toggle: COMPACT (×0.9) / STANDARD (×1.0) / LARGE (×1.35).
+Applied as CSS zoom on <body> — proportional, cqh recompute, design scales
+coherently. Design for STANDARD.
+
+## ENHANCE
+
+Native ColorMatrix grade: contrast 1.12 around mid-gray + saturation 1.18.
+Applied per frame at native speed. frame0.png exported with same grade.
+Not an AI model — deterministic, zero-dependency.
 
 ## QC loop (fast)
 
-1. Render a 480p DRAFT first - the fastest full-fidelity timing check.
-2. Scrub-verify the manifest MEGA-SLAM timestamp (e.g. @16.2s): punch-word + ring-burst exactly there. Frame-accurate at 30 fps.
-3. Check "animations locked: N" > 0 (N ~ number of timed elements; N = 0 means the AI slipped JS motion in - regenerate).
-4. Render FINAL 1080p30. Bottom 25% stays empty for captions layered in the editor later.
+1. Render 480p DRAFT first — fastest full-fidelity timing check.
+2. Scrub-verify the manifest MEGA-SLAM timestamp: visual + sound on same frame.
+3. Check "animations locked: N" > 0 (or "JS: scrub-safe __broll active").
+4. Check ambience declared and audible.
+5. Render FINAL 1080p30. Bottom 25% stays empty for captions.
 
-## "Do my prompt's font/element sizes need to change?" - No
+## Paste HTML
 
-Small-looking renders were a viewport-scale artifact, never a design-size problem. The prompt sizes everything in cqh - fractions of the 16:9 frame - and the app guarantees that frame maps onto the full output canvas: AUTO lock (+-2 px) when it fills the window, frame-fit when the black-wrapper design makes it smaller (CSS re-rasterization - text and SVG strokes at full output resolution). Keep the punch-word (8-15cqh) vs label (1.4-2.3cqh) budget exactly as the prompt defines it.
+PICK screen: PASTE HTML reads clipboard (any length), validates it looks like
+HTML, writes to cache, prepares. No file-size limit.
 
-Optional belt-and-suspenders (NOT required - frame-fit already handles it): make .fit fill the window itself so the app's fit scale stays ~1:
+## No file-size limit
 
-    .fit { aspect-ratio:16/9; container-type:size; overflow:hidden;
-           width:100vw; max-width:177.78vh; margin:0 auto; }
-
-## SFX - declarative sound effects (supported)
-
-The renderer can bake synthesized SFX into the MP4's audio track. To opt in, every generated file carries a DATA-ONLY manifest (not logic - the zero-JS rule is untouched):
-
-    <script type="application/json" id="sfx">
-    {"loudness":"low","events":[{"t":16.2,"id":"slam","gain":0.65}]}
-    </script>
-
-The app master-gains the mix (0.45) and applies the declared loudness; the
-SFX VOLUME row in the app (QUIET/NORMAL/LOUD) starts at the page's declared
-value and the user's final choice wins.
-
-Rules for the generation prompt:
-- t = seconds on the SAME timeline as animation-delay (the spoken-beat clock)
-- one event per visual beat, max ~12 per 60s block; the mega-slam always gets "slam"
-- vocabulary: slam (stamp / kinetic word landing), boom (deep impact), whoosh (enter/exit sweep), tick (small UI/HUD), rise (build-up INTO a beat - place at impactT minus 0.8), ding (reveal), pop (small object), glitch (error/reject)
-- gain 0-1, default 0.7
-
-Why manifest instead of audio elements: the render scrubs the frozen CSS clock at render speed (not real time), so live audio can never stay in sync. Declared events are synthesized app-side and muxed on the same master frame clock - sample-accurate, offline, deterministic, no audio files in the HTML.
-
-## Generation prompt
-
-The versioned generation prompt lives in `GENERATION_PROMPT.md` - it matches this app build exactly: the #sfx sound contract, full-window .fit (LOCKED +-0px path), camera moves / parallax / odometer / clip-path wipes in the motion grammar, and a RECORD NOTE with no screen-record fallback. Use it as the single prompt pasted alongside the SRT.
+The WebView loads from file:// on disk. HTML can be any size. Media lives at
+URLs or file paths, keeping the HTML itself lean.

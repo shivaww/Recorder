@@ -1,7 +1,9 @@
 package com.brollrender.app
 
 import android.app.Activity
+import android.content.ClipboardManager
 import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -178,6 +180,14 @@ class MainActivity : Activity() {
             )
             setOnClickListener { launchPicker() }
         })
+        col.addView(spacer(dp(8)))
+        col.addView(mkButton("PASTE HTML").apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(48)
+            )
+            setOnClickListener { pasteHtml() }
+        })
         if (htmlFile != null) {
             col.addView(spacer(dp(12)))
             col.addView(monoTv("last: $htmlName", 12, TXT2))
@@ -187,19 +197,21 @@ class MainActivity : Activity() {
         val resRow = toggleRow(
             col, "RESOLUTION",
             listOf(
+                "4K" to { resW = 3840; resH = 2160; bitRate = 40_000_000 },
                 "1080p" to { resW = 1920; resH = 1080; bitRate = 16_000_000 },
                 "720p" to { resW = 1280; resH = 720; bitRate = 8_000_000 },
                 "480p" to { resW = 854; resH = 480; bitRate = 8_000_000 }
             ),
-            if (resW == 1920) 0 else if (resW == 1280) 1 else 2
+            if (resW == 3840) 0 else if (resW == 1920) 1 else if (resW == 1280) 2 else 3
         )
         val fpsRow = toggleRow(
             col, "FPS",
             listOf(
                 "30" to { fps = 30 },
-                "24" to { fps = 24 }
+                "24" to { fps = 24 },
+                "60" to { fps = 60 }
             ),
-            if (fps == 30) 0 else 1
+            if (fps == 30) 0 else if (fps == 24) 1 else 2
         )
         // MODE is a preset: selecting it snaps the resolution + FPS rows too.
         toggleRow(
@@ -283,6 +295,41 @@ class MainActivity : Activity() {
         i.addCategory(Intent.CATEGORY_OPENABLE)
         i.type = "text/html"
         startActivityForResult(i, REQ_PICK)
+    }
+
+    /** Paste full HTML from clipboard (any length, Termux-style). */
+    private fun pasteHtml() {
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val text = cm.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
+        if (text.isBlank()) {
+            showErrorScreen("clipboard is empty - copy the full HTML first")
+            return
+        }
+        val trimmed = text.trim()
+        if (!trimmed.startsWith("<") && !trimmed.contains("<html", ignoreCase = true)
+            && !trimmed.contains("<!doctype", ignoreCase = true)) {
+            showErrorScreen("clipboard doesn't look like HTML - copy the full file content")
+            return
+        }
+        showBusy("WRITING PASTED HTML")
+        Thread {
+            try {
+                val f = File(cacheDir, "pasted.html")
+                f.writeText(text)
+                htmlFile = f
+                htmlName = "pasted (${text.length / 1024}KB)"
+                runOnUiThread { showBusy("ANALYZING PAGE") }
+                val result = engine.prepare(f, resW, resH)
+                runOnUiThread {
+                    when (result) {
+                        is RenderEngine.PrepareResult.Ok -> showPreviewScreen(result)
+                        is RenderEngine.PrepareResult.Fail -> showErrorScreen(result.message)
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread { showErrorScreen("paste failed: ${e.message}") }
+            }
+        }.start()
     }
 
     @Suppress("DEPRECATION")
@@ -377,7 +424,7 @@ class MainActivity : Activity() {
         var zoomView: ZoomView? = null
         var enhanceOn = false
         var sfxOn = p.sfxEvents.isNotEmpty()
-        var textBig = true
+        var textScale = 1.0f
         var sfxVol: String = p.sfxLoudness ?: "normal"
         val btnFull = mkButton("FULL")
         val btnCenter = mkButton("CENTER")
@@ -462,6 +509,10 @@ class MainActivity : Activity() {
         p.note?.let { col.addView(monoTv("detection: $it", 11, AMBER)) }
         col.addView(spacer(dp(8)))
         col.addView(monoTv("animations locked: ${p.animCount}", 12, TXT2))
+        if (p.isBrollJs) {
+            col.addView(monoTv("JS: scrub-safe __broll active (canvas/WebGL)", 12, TXT2))
+        }
+        p.brollWarning?.let { col.addView(monoTv("JS warning: $it", 12, AMBER)) }
         if (p.sfxEvents.isNotEmpty()) {
             col.addView(monoTv("sfx: ${p.sfxEvents.size} events declared", 12, TXT2))
         }
@@ -518,9 +569,10 @@ class MainActivity : Activity() {
             listOf(
                 "8M" to { bitRate = 8_000_000 },
                 "16M" to { bitRate = 16_000_000 },
-                "24M" to { bitRate = 24_000_000 }
+                "24M" to { bitRate = 24_000_000 },
+                "40M" to { bitRate = 40_000_000 }
             ),
-            if (bitRate == 8_000_000) 0 else if (bitRate == 24_000_000) 2 else 1
+            if (bitRate == 8_000_000) 0 else if (bitRate == 16_000_000) 1 else if (bitRate == 24_000_000) 2 else 3
         )
 
         // SFX: synthesized sound baked into the MP4's audio track when
@@ -549,10 +601,11 @@ class MainActivity : Activity() {
         toggleRow(
             col, "TEXT",
             listOf(
-                "COMPACT" to { textBig = false },
-                "BIG" to { textBig = true }
+                "COMPACT" to { textScale = 0.9f },
+                "STANDARD" to { textScale = 1.0f },
+                "LARGE" to { textScale = 1.35f }
             ),
-            if (textBig) 1 else 0
+            1
         )
 
         // ENHANCE: honest naming - a fast native ColorMatrix color grade
@@ -592,7 +645,7 @@ class MainActivity : Activity() {
                 val zv = if (manual) (zoom ?: ZoomTransform(1f, 0f, 0f)) else null
                 startRender(
                     p, secs.coerceIn(5, 600), zv, enhanceOn, sfxOn,
-                    if (textBig) 1.25f else 1f, sfxVol
+                    textScale, sfxVol
                 )
             }
         })
@@ -764,6 +817,8 @@ class MainActivity : Activity() {
             enhance = enhance,
             sfxEvents = if (sfxOn) p.sfxEvents else emptyList(),
             sfxLoudness = sfxVol,
+            ambienceType = if (sfxOn) p.ambienceType else null,
+            ambienceGain = p.ambienceGain,
             textScale = textScale,
             onProgress = { f, t, rate, eta ->
                 runOnUiThread { updateRenderProgress(f, t, rate, eta) }

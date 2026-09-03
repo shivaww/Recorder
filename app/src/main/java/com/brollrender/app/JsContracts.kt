@@ -1,8 +1,13 @@
 package com.brollrender.app
 
 /**
- * FROZEN JS contracts - verbatim from the BrollRender spec, section 3.
- * Do not edit: the HTML files are built against these exact strings.
+ * JS contracts for the BrollRender engine.
+ *
+ * Two page modes:
+ *  - CSS-only: all motion via CSS keyframes, scrubbed by document.getAnimations()
+ *  - Scrub-safe JS: page implements window.__broll = { seek(tSec), duration() }
+ *    for canvas/WebGL/dynamic effects. Banned: setInterval, setTimeout,
+ *    requestAnimationFrame, fetch, network calls, Audio/Video playback.
  *
  * evaluateJavascript returns results JSON-encoded (e.g. "loaded" arrives as
  * "\"loaded\""); callers must unwrap/parse accordingly (see RenderEngine).
@@ -46,13 +51,21 @@ object JsContracts {
         })()
     """.trimIndent()
 
-    /** Auto-detect timeline length in ms (ignores infinite ambient loops). */
+    /** Auto-detect timeline length in ms. Checks __broll.duration() first
+     *  (scrub-safe JS pages), falls back to CSS animation endTime scan
+     *  (ignores infinite ambient loops). */
     val DURATION_JS = """
-        (() => Math.max(0, ...document.getAnimations().map(a => {
-          try { const t = a.effect && a.effect.getComputedTiming();
-                return (t && t.endTime != null && t.endTime !== Infinity) ? t.endTime : 0; }
-          catch (e) { return 0; }
-        })))()
+        (() => {
+          if (window.__broll && typeof window.__broll.duration === 'function') {
+            const d = window.__broll.duration();
+            if (isFinite(d) && d > 0) return d * 1000;
+          }
+          return Math.max(0, ...document.getAnimations().map(a => {
+            try { const t = a.effect && a.effect.getComputedTiming();
+                  return (t && t.endTime != null && t.endTime !== Infinity) ? t.endTime : 0; }
+            catch (e) { return 0; }
+          }));
+        })()
     """.trimIndent()
 
     /** Poll after onPageFinished until result === "loaded". */
@@ -70,10 +83,18 @@ object JsContracts {
     // SEEK_JS - per frame; MS substituted as milliseconds, "%.3f".
     // Locale.US is load-bearing: a comma decimal separator ("16,200") is a
     // JS syntax error and would silently freeze the clock on some locales.
-    private const val SEEK_TEMPLATE = "window.__a.forEach(a => a.currentTime = %s)"
+    // Scrub-safe JS pages get __broll.seek(tSec) alongside the CSS scrub.
+    // The trailing offsetHeight forces synchronous style+layout flush so the
+    // subsequent draw captures the correct frame (no paint race).
+    private const val SEEK_TEMPLATE =
+        "window.__a.forEach(a => a.currentTime = %s);" +
+        "if(window.__broll&&window.__broll.seek)window.__broll.seek(%s/1000);" +
+        "void document.body.offsetHeight"
 
-    fun seekJs(ms: Double): String =
-        SEEK_TEMPLATE.format(String.format(java.util.Locale.US, "%.3f", ms))
+    fun seekJs(ms: Double): String {
+        val v = String.format(java.util.Locale.US, "%.3f", ms)
+        return String.format(SEEK_TEMPLATE, v, v)
+    }
 
     // Manual framing (peak customization): CSS transform on <html>, origin
     // 0 0. SCALE = zoom factor; PNX/PNY = normalized pan fractions of the
@@ -180,8 +201,7 @@ object JsContracts {
     //     [{"t":16.2,"id":"slam","gain":0.9}, ...]
     //   </script>
     // t is seconds on the SAME timeline as animation-delay. The engine
-    // synthesizes + mixes these onto the MP4's audio track; the zero-JS
-    // rule stays intact because the block is data, not logic.
+    // synthesizes + mixes these onto the MP4's audio track.
     val SFX_MANIFEST_JS = """
         (() => {
           const el = document.querySelector('script#sfx[type="application/json"]');
@@ -201,6 +221,54 @@ object JsContracts {
             }
             return { events: out };
           } catch (err) { return { error: String(err) }; }
+        })()
+    """.trimIndent()
+
+    // Scrub-safe JS validation: static scan of script contents for banned
+    // time-dependent APIs. Warning-level (the renderer simply can't scrub
+    // them, so they're inert - but the user should know).
+    val BROLL_VALIDATE_JS = """
+        (() => {
+          const banned = ['setInterval','setTimeout','requestAnimationFrame','fetch','XMLHttpRequest','WebSocket'];
+          const scripts = document.querySelectorAll('script:not([type="application/json"])');
+          const hits = [];
+          for (const s of scripts) {
+            const src = s.textContent || '';
+            for (const b of banned) {
+              if (src.includes(b + '(')) hits.push(b);
+            }
+          }
+          return JSON.stringify({ clean: hits.length === 0, violations: [...new Set(hits)] });
+        })()
+    """.trimIndent()
+
+    // Scrub-safe JS capability probe: does the page implement __broll?
+    val BROLL_DETECT_JS = """
+        JSON.stringify({
+          broll: !!(window.__broll),
+          seek: !!(window.__broll && typeof window.__broll.seek === 'function'),
+          duration: !!(window.__broll && typeof window.__broll.duration === 'function')
+        })
+    """.trimIndent()
+
+    // Ambience manifest (background audio bed): a data-only JSON block -
+    //   <script type="application/json" id="ambience">
+    //     {"type":"drone","gain":0.25}
+    //   </script>
+    // Types: drone, pulse, air, tension. The renderer synthesizes a
+    // continuous bed and mixes it under SFX at low gain.
+    val AMBIENCE_MANIFEST_JS = """
+        (() => {
+          const el = document.querySelector('script#ambience[type="application/json"]');
+          if (!el) return { present: false };
+          try {
+            const d = JSON.parse(el.textContent);
+            return {
+              present: true,
+              type: String(d.type || 'drone'),
+              gain: Math.min(1, Math.max(0, +d.gain || 0.25))
+            };
+          } catch (err) { return { present: false, error: String(err) }; }
         })()
     """.trimIndent()
 }
