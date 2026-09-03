@@ -219,7 +219,7 @@ object Sfx {
         var lp = 0f; var lp2 = 0f
         for (i in 0 until n) {
             val t = i.toDouble() / SAMPLE_RATE
-            val mod = 0.7 + 0.3 * sin(TAU * 0.12 * t).toFloat() // slow breathing
+            val mod = (0.7 + 0.3 * sin(TAU * 0.12 * t)).toFloat() // slow breathing
             lp += (nz[i] - lp) * 0.02f // heavy lowpass
             lp2 += (lp - lp2) * 0.04f // second stage
             out[i] = lp2 * mod * 0.6f

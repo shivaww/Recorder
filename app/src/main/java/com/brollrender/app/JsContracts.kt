@@ -251,6 +251,20 @@ object JsContracts {
         })
     """.trimIndent()
 
+    // Image load status: checks all <img> elements for complete + loaded.
+    // URL images load asynchronously; the renderer must wait before capture.
+    val IMAGES_STATUS_JS = """
+        (() => {
+          const imgs = document.querySelectorAll('img');
+          if (imgs.length === 0) return { total: 0, loaded: 0, ready: true };
+          let loaded = 0;
+          for (const img of imgs) {
+            if (img.complete && img.naturalWidth > 0) loaded++;
+          }
+          return { total: imgs.length, loaded: loaded, ready: loaded >= imgs.length };
+        })()
+    """.trimIndent()
+
     // Ambience manifest (background audio bed): a data-only JSON block -
     //   <script type="application/json" id="ambience">
     //     {"type":"drone","gain":0.25}

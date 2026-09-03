@@ -53,9 +53,9 @@ class VideoEncoder(
                 MediaFormat.KEY_COLOR_FORMAT,
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
             )
-            // High Profile: better compression efficiency than Baseline/Main
-            // at the same bitrate. All devices with API 26+ support it.
-            setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileAVCHigh)
+            // High Profile (value 8): better compression efficiency than
+            // Baseline/Main at the same bitrate.
+            setInteger(MediaFormat.KEY_PROFILE, 8)
             // VBR: quality-biased encoding. KEY_BIT_RATE becomes the ceiling;
             // the encoder spends bits where motion/complexity demands them
             // instead of spreading evenly. Ideal for motion graphics.

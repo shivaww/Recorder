@@ -293,6 +293,22 @@ class RenderEngine(private val activity: Activity) {
                 }
             }
 
+            // URL images: wait for all <img> to finish loading (async
+            // network fetch). Without this, early frames render broken/empty
+            // images. 15s timeout; timeout = warning (images may pop in).
+            var imagesReady = true
+            val imgDeadline = System.currentTimeMillis() + 15_000L
+            while (System.currentTimeMillis() < imgDeadline) {
+                val imgStatus = parseJsonObject(evalJs(web, JsContracts.IMAGES_STATUS_JS))
+                if (imgStatus != null && imgStatus.optBoolean("ready", true)) break
+                imagesReady = imgStatus?.optBoolean("ready", true) ?: true
+                Thread.sleep(300)
+            }
+            if (!imagesReady) {
+                // Images still loading after 15s - proceed with warning
+                // (they may pop in on later frames or be broken URLs)
+            }
+
             // Strip crop chrome twice: ?headless=1 in the URL AND injection
             // (pitfall 7.11).
             evalJs(web, JsContracts.HEADLESS_JS)
