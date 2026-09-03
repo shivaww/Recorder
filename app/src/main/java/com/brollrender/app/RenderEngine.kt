@@ -152,10 +152,12 @@ class RenderEngine(private val activity: Activity) {
             web.settings.apply {
                 javaScriptEnabled = true
                 allowFileAccess = true
-                // Honor the page's viewport meta so the CSS viewport equals
-                // the output canvas (prevents the frame rasterizing smaller
-                // than the MP4 - the Chrome-vs-renderer shrink bug).
-                useWideViewPort = true
+                // Force the CSS viewport to ALWAYS equal the output canvas
+                // (view width), for ANY html - with or without a viewport
+                // meta. This guarantees .fit (100vw) fills the MP4 frame and
+                // matches the Chrome preview. (true would fall back to 980px
+                // for meta-less pages and re-shrink them.)
+                useWideViewPort = false
                 loadWithOverviewMode = false
                 textZoom = 100
                 cacheMode = WebSettings.LOAD_DEFAULT
