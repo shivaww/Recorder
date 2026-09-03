@@ -81,6 +81,10 @@ Never sit at rung 6 alone. Combine a rung 1-5 subject OVER a rung 6 floor.
 ════════ PART 2 — HARD RENDERER CONTRACT (violation = rejected) ════════
 
 1. DOM skeleton (full-window frame):
+   <head>
+     <meta name="viewport" content="width=device-width, initial-scale=1">
+     <link ... ONE Google Fonts ...>
+   </head>
    <body>
      <div class="fit" id="video-frame">
        <canvas id="fx" width="1920" height="1080"></canvas>  (optional FX)
@@ -100,6 +104,8 @@ Never sit at rung 6 alone. Combine a rung 1-5 subject OVER a rung 6 floor.
    .fit (never px/vw/vh; exception: canvas width/height attrs).
    .safe{position:absolute;inset:0 0 25% 0}   (bottom 25% = captions, empty)
    ONE Google Fonts <link>; any pairing (renderer-checked).
+   The viewport meta is REQUIRED - without it the renderer's WebView falls
+   back to a ~980px layout width and shrinks the frame inside the MP4.
 
 3. Scrub-proof: animations on REAL elements only (pseudo = static styling);
    fill-mode both/forwards; stroke reveals pathLength=1 + dasharray 1;

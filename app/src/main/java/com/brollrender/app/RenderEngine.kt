@@ -152,7 +152,10 @@ class RenderEngine(private val activity: Activity) {
             web.settings.apply {
                 javaScriptEnabled = true
                 allowFileAccess = true
-                useWideViewPort = false
+                // Honor the page's viewport meta so the CSS viewport equals
+                // the output canvas (prevents the frame rasterizing smaller
+                // than the MP4 - the Chrome-vs-renderer shrink bug).
+                useWideViewPort = true
                 loadWithOverviewMode = false
                 textZoom = 100
                 cacheMode = WebSettings.LOAD_DEFAULT
@@ -168,6 +171,7 @@ class RenderEngine(private val activity: Activity) {
             // mix-blend-mode, backdrop-filter, Canvas 2D GPU accel, WebGL.
             // Capture via web.draw(softwareCanvas) triggers synchronous
             // GPU->CPU readback; the seek JS forces reflow before draw.
+            web.setInitialScale(100) // no auto-scaling; 1 CSS px = 1 dp
             web.setLayerType(View.LAYER_TYPE_HARDWARE, null)
             activity.addContentView(web, FrameLayout.LayoutParams(w, h))
             web.visibility = View.INVISIBLE
