@@ -608,11 +608,13 @@ class MainActivity : Activity() {
             1
         )
 
-        // ENHANCE: honest naming - a fast native ColorMatrix color grade
-        // (contrast ~1.12 around mid-gray + saturation 1.18), not an AI model
-        // (zero-dependency app, nothing bundled, nothing uploaded). Pops soft
-        // raster content; frame0.png is exported with the same grade so QC
-        // still matches the video's first frame.
+        // ENHANCE: honest naming - a color grade (contrast ~1.12 around
+        // mid-gray + saturation 1.18) applied as a root CSS filter by
+        // Chromium's GPU compositor - identical math to the old native
+        // ColorMatrix blit, still not an AI model (zero-dependency app,
+        // nothing bundled, nothing uploaded). Pops soft raster content;
+        // frame0.png is exported with the same grade so QC still matches
+        // the video's first frame.
         toggleRow(
             col, "ENHANCE",
             listOf(

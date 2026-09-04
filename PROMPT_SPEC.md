@@ -33,8 +33,9 @@ RENDER → DONE. No screen recording, no editor crop, no resampling blur.
 - WebView: LAYER_TYPE_HARDWARE → Chromium GPU compositor.
 - Enables: CSS filters, mix-blend-mode, backdrop-filter, Canvas 2D GPU accel,
   WebGL, 3D transforms.
-- Per frame: seek JS (forces synchronous reflow) → web.draw() → GPU→CPU
-  readback → blit to encoder surface → H.264 encode.
+- Per frame: seek JS (forces synchronous reflow) → web.draw() straight into
+ the encoder surface's hardware canvas (GPU-direct, validated per render
+ by a PixelCopy probe; CPU readback + blit fallback) → H.264 encode.
 - No screen capture. No network needed after first render (fonts + images cached).
 
 ## Media loading
@@ -78,8 +79,9 @@ coherently. Design for STANDARD.
 
 ## ENHANCE
 
-Native ColorMatrix grade: contrast 1.12 around mid-gray + saturation 1.18.
-Applied per frame at native speed. frame0.png exported with same grade.
+Root CSS filter grade: contrast 1.12 around mid-gray + saturation 1.18,
+executed by Chromium's GPU compositor (identical math to the old native
+ColorMatrix). frame0.png exported with same grade.
 Not an AI model — deterministic, zero-dependency.
 
 ## QC loop (fast)

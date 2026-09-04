@@ -30,5 +30,6 @@ Run against any HTML file (conforming files auto-detect the frame; non-conformin
 | 17 | SFX variant (`temporary_sfx.html`): MP4 has an audible audio track; the slam lands exactly with the 16.2s MEGA-SLAM (audio/video sync) | | |
 | 18 | Fixture 2 (`temporary2.html`, prompt-verbatim full-window .fit): PREVIEW shows AUTO `LOCKED`; at t=16.2s the white flash + double rings + chromatic ghosts + "PROOF?" land on ONE frame with the slam sound; odometer rolls, clip-path wipe + flip-card play; rise swell audible from ~15.4s | | |
 | 19 | RENDER screen shows `AUDIO: mixing` then `AUDIO: encoding` before frames start (no silent hang); SFX volume comfortable at default, QUIET vs LOUD audibly differ; TEXT BIG renders visibly larger text than COMPACT | | |
+| 20 | FAST PATH: render r f/s clearly higher than the previous APK on the same HTML + settings; logcat tag `RenderEngine` shows `gpu probe passed` (a `software path` line means fallback - output still correct, just slower); MP4 VERIFIED and frame0.png still matches | | |
 
 Every FAIL gets a one-line note: what was seen vs what was expected, and at which screen (PICK/PREVIEW/RENDER/DONE). Update this file in the repo after each run - the checklist is the definition of done.

@@ -3,10 +3,14 @@ package com.brollrender.app
 import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.ColorMatrix
-import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.Rect
+import android.graphics.SurfaceTexture
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+import android.view.PixelCopy
+import android.view.Surface
 import android.widget.FrameLayout
 import android.view.View
 import android.view.ViewGroup
@@ -26,8 +30,9 @@ import java.util.concurrent.TimeUnit
  *
  * The WebView is attached INVISIBLE (never GONE), manually measured and laid
  * out at the exact output pixel size, HARDWARE-layered (GPU compositing for
- * full CSS filter/blend/canvas/WebGL support), and drawn manually into a
- * bitmap INSIDE the evaluateJavascript callback of each seek (pitfalls
+ * full CSS filter/blend/canvas/WebGL support), and drawn INSIDE the evaluateJavascript callback of each seek -
+ * GPU-direct into the encoder surface when the probe passes, into a
+ * software bitmap (readback) otherwise (pitfalls
  * 7.1-7.3). The seek JS forces synchronous style+layout flush
  * (document.body.offsetHeight) so the draw captures the correct frame.
  * Driven from a worker thread; every WebView touch is posted to the UI
@@ -43,6 +48,7 @@ class RenderEngine(private val activity: Activity) {
 
     companion object {
         const val VOID_COLOR = 0xFF0A0C10.toInt()
+        private const val TAG = "RenderEngine"
         private const val THUMB_W = 480
         private const val THUMB_H = 270
     }
@@ -80,6 +86,10 @@ class RenderEngine(private val activity: Activity) {
     }
 
     private var webView: WebView? = null
+
+    /** PixelCopy completion listener thread (main looper; the copy itself
+     *  is initiated from the render worker thread - never the UI thread). */
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     /**
      * evaluateJavascript results are JSON-ENCODED (spec section 3), and the
@@ -123,7 +133,8 @@ class RenderEngine(private val activity: Activity) {
     /**
      * Creates the offscreen WebView once and reuses it for later renders
      * (acceptance 6). Attached via addContentView, INVISIBLE (never GONE),
-     * software layer, manually measured and laid out at exactly w x h px.
+     * HARDWARE layer (GPU compositor), manually measured and laid out at
+     * exactly w x h px.
      */
     private fun obtainWebView(w: Int, h: Int): WebView {
         webView?.let { web ->
@@ -171,8 +182,10 @@ class RenderEngine(private val activity: Activity) {
             }
             // HARDWARE layer: Chromium GPU compositor - enables CSS filters,
             // mix-blend-mode, backdrop-filter, Canvas 2D GPU accel, WebGL.
-            // Capture via web.draw(softwareCanvas) triggers synchronous
-            // GPU->CPU readback; the seek JS forces reflow before draw.
+            // Per frame, web.draw() runs inside the seek callback: GPU-direct
+            // into the encoder surface's hardware canvas (fast path), or into
+            // a software bitmap (synchronous GPU->CPU readback fallback); the
+            // seek JS forces reflow before the draw.
             web.setInitialScale(100) // no auto-scaling; 1 CSS px = 1 dp
             web.setLayerType(View.LAYER_TYPE_HARDWARE, null)
             activity.addContentView(web, FrameLayout.LayoutParams(w, h))
@@ -515,11 +528,15 @@ class RenderEngine(private val activity: Activity) {
     }
 
     /**
-     * Section 5.8 frame loop. Worker thread; ONLY this thread touches the
-     * codec/surface (section 6). Seek + draw land in one UI-thread callback
-     * pass (pitfall 7.3); the blit is 1:1 with filterBitmap=false (pitfall
-     * 7.10); drain after every frame; EOS drain; codec released before muxer
-     * (inside VideoEncoder). Cancel = clean abort, partial file deleted.
+     * Section 5.8 frame loop. Worker thread; the codec is drained ONLY from
+     * this thread (section 6). Per frame, seek + draw land in one UI-thread
+     * callback pass (pitfall 7.3). FAST PATH: the page is drawn straight
+     * into the encoder's input surface (hardware canvas, GL-to-GL, no CPU
+     * round trip) after a one-shot probe validates it; the software pipeline
+     * (GPU->CPU readback + 1:1 blit, filterBitmap=false, pitfall 7.10) is the
+     * automatic fallback. Drain after every frame; EOS drain; codec released
+     * before muxer (inside VideoEncoder). Cancel = clean abort, partial file
+     * deleted.
      */
     fun render(
         frameRect: Rect,
@@ -547,24 +564,11 @@ class RenderEngine(private val activity: Activity) {
         try {
             val frameBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888) // allocate ONCE
             val blit = Paint().apply { isFilterBitmap = false }
-            if (enhance) {
-                // Real, fast color-grade enhance: contrast 1.12 around mid-gray
-                // + saturation 1.18, applied at native speed during the blit.
-                // Deterministic - honestly NOT an AI model (see preview note).
-                val cm = ColorMatrix()
-                cm.setSaturation(1.18f)
-                cm.postConcat(
-                    ColorMatrix(
-                        floatArrayOf(
-                            1.12f, 0f, 0f, 0f, -15.3f,
-                            0f, 1.12f, 0f, 0f, -15.3f,
-                            0f, 0f, 1.12f, 0f, -15.3f,
-                            0f, 0f, 0f, 1f, 0f
-                        )
-                    )
-                )
-                blit.colorFilter = ColorMatrixColorFilter(cm)
-            }
+            // Frame-0 QC export (frame0.png, acceptance 4): snapshot the
+            // FIRST frame the moment it exists - the software pass below
+            // overwrites frameBmp on every frame, so the old post-loop copy
+            // exported the LAST frame as "frame0".
+            var firstFrame: Bitmap? = null
 
             // SFX: mix + AAC-encode the full timeline BEFORE the frame
             // loop. Both tracks then derive PTS from the same master clock -
@@ -600,33 +604,93 @@ class RenderEngine(private val activity: Activity) {
                 Thread.sleep(100)
             }
 
+            // ENHANCE grade: now a root CSS filter (identical math to the
+            // old ColorMatrix blit - see JsContracts.enhanceJs) so BOTH
+            // paths apply it: Chromium's compositor filters the GPU draws
+            // for free; software draws produce the same pixels. ALWAYS
+            // written, on or off - same leak rule as the zoom transform.
+            evalJs(web, JsContracts.enhanceJs(enhance))
+            Thread.sleep(100) // filter settle before frame 0
+
+            // FAST PATH: draw the page straight into the encoder's input
+            // surface (GL-to-GL, no CPU round trip). gpuProbe() validates
+            // it once per render; any failure falls back to software below.
+            val gpuDirect = gpuProbe(web, frameRect, fps, totalFrames)
+
             for (f in 0 until totalFrames) {
                 if (isCancelled()) {
                     encoder.release()
                     outputFile.delete()
                     return RenderOutcome.Cancelled
                 }
+                var drawError: Exception? = null
                 val latch = CountDownLatch(1)
                 activity.runOnUiThread {
                     web.evaluateJavascript(JsContracts.seekJs(f * 1000.0 / fps)) { _ ->
                         // Draw INSIDE this callback - the seek is guaranteed
                         // applied on this same UI-thread pass (pitfall 7.3).
-                        val c = Canvas(frameBmp)
-                        c.drawColor(VOID_COLOR) // page void color
-                        c.save()
-                        c.clipRect(frameRect) // only the 16:9 region
-                        c.translate(-frameRect.left.toFloat(), -frameRect.top.toFloat())
-                        web.draw(c)
-                        c.restore()
-                        latch.countDown()
+                        try {
+                            if (gpuDirect) {
+                                // FAST PATH: web.draw() into the encoder
+                                // surface's HARDWARE canvas - the GL functor
+                                // renders GPU-side, no CPU pixels. Surface
+                                // ops on THIS thread (it owns the surface).
+                                val sc = surface.lockHardwareCanvas()
+                                sc.drawColor(VOID_COLOR) // page void color
+                                sc.save()
+                                sc.clipRect(frameRect) // only the 16:9 region
+                                sc.translate(-frameRect.left.toFloat(), -frameRect.top.toFloat())
+                                web.draw(sc)
+                                sc.restore()
+                                surface.unlockCanvasAndPost(sc)
+                            } else {
+                                // SOFTWARE FALLBACK (original pipeline):
+                                // synchronous GPU->CPU readback; the render
+                                // thread uploads the bitmap below.
+                                val c = Canvas(frameBmp)
+                                c.drawColor(VOID_COLOR)
+                                c.save()
+                                c.clipRect(frameRect)
+                                c.translate(-frameRect.left.toFloat(), -frameRect.top.toFloat())
+                                web.draw(c)
+                                c.restore()
+                            }
+                            if (f == 0) {
+                                // frame0.png QC (acceptance 4): a fresh
+                                // SOFTWARE draw of frame 0 - never PixelCopy
+                                // from the encoder surface (single consumer),
+                                // never the old post-loop copy (which
+                                // exported the LAST frame as "frame0").
+                                firstFrame = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { g ->
+                                    val fc = Canvas(g)
+                                    fc.drawColor(VOID_COLOR)
+                                    fc.save()
+                                    fc.clipRect(frameRect)
+                                    fc.translate(-frameRect.left.toFloat(), -frameRect.top.toFloat())
+                                    web.draw(fc)
+                                    fc.restore()
+                                }
+                            }
+                        } catch (e: Exception) {
+                            // Surface ops CAN throw (fast path): record and
+                            // fail cleanly on the worker thread, no UI crash.
+                            drawError = e
+                        } finally {
+                            latch.countDown()
+                        }
                     }
                 }
                 if (!latch.await(10, TimeUnit.SECONDS)) {
                     throw RuntimeException("frame $f timed out")
                 }
-                val sc = surface.lockHardwareCanvas()
-                sc.drawBitmap(frameBmp, null, Rect(0, 0, w, h), blit)
-                surface.unlockCanvasAndPost(sc)
+                drawError?.let {
+                    throw RuntimeException("frame $f draw failed: ${it.message}")
+                }
+                if (!gpuDirect) {
+                    val sc = surface.lockHardwareCanvas()
+                    sc.drawBitmap(frameBmp, null, Rect(0, 0, w, h), blit)
+                    surface.unlockCanvasAndPost(sc)
+                }
                 encoder.drain(false)
 
                 if (f % 30 == 0 || f == totalFrames - 1) {
@@ -642,22 +706,172 @@ class RenderEngine(private val activity: Activity) {
 
             encoder.signalEos()
             encoder.drain(true)
-            val firstFrame = if (blit.colorFilter != null) {
-                // frame0.png must match the video's first frame (acceptance 4):
-                // export it with the same enhance grade applied.
-                Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { g ->
-                    Canvas(g).drawBitmap(frameBmp, null, Rect(0, 0, w, h), blit)
-                }
-            } else {
-                frameBmp.copy(Bitmap.Config.ARGB_8888, false)
-            }
             encoder.release()
-            return RenderOutcome.Completed(firstFrame)
+            return RenderOutcome.Completed(
+                firstFrame ?: frameBmp.copy(Bitmap.Config.ARGB_8888, false)
+            )
         } catch (e: Exception) {
             encoder?.release()
             outputFile.delete()
             return RenderOutcome.Failed("render failed: ${e.message}")
         }
+    }
+
+    /**
+     * One-shot validation of the GPU-direct frame path. Two mid-timeline
+     * seeks are drawn both ways - into a throwaway SurfaceTexture-backed
+     * surface (the exact lockHardwareCanvas path the render loop uses) and
+     * into a software bitmap (ground truth) - then compared. Any throw,
+     * PixelCopy failure, blank GPU frame, or content mismatch (including a
+     * stale/cached functor, where the second GPU frame would repeat the
+     * first) downgrades the whole render to the software pipeline. The
+     * encoder's surface is never touched: a probe frame must never reach
+     * the video stream. Runs on the render worker thread.
+     */
+    private fun gpuProbe(web: WebView, frameRect: Rect, fps: Int, totalFrames: Int): Boolean {
+        val w = outW
+        val h = outH
+        // Detached SurfaceTexture (single-buffer-mode constructor, API 26):
+        // no GL context needed on this thread - it is only the buffer sink.
+        val tex = SurfaceTexture(false)
+        // Required before the first lock: a SurfaceTexture-backed
+        // surface without a default buffer size dequeues wrong-sized
+        // buffers and the probe would fail on every device.
+        tex.setDefaultBufferSize(w, h)
+        val probeSurface = Surface(tex)
+        try {
+            // Two DIFFERENT mid-timeline times: differing frames prove the
+            // functor drew live content per seek, not a stale cached layer.
+            val f1 = (totalFrames / 3).coerceAtLeast(1)
+            val f2 = (2 * totalFrames / 3).coerceAtLeast(f1 + 1)
+            val t1 = f1 * 1000.0 / fps
+            val t2 = f2 * 1000.0 / fps
+            for (tMs in listOf(t1, t2)) {
+                probeDraw(web, probeSurface, frameRect, tMs)
+                val gpu = copySurface(probeSurface, w, h)
+                if (gpu == null) {
+                    Log.w(TAG, "gpu probe: PixelCopy readback failed")
+                    return false
+                }
+                val ref = probeReference(web, frameRect, tMs, w, h)
+                if (!framesAgree(gpu, ref, w, h)) {
+                    Log.w(TAG, "gpu probe: GPU frame disagrees with software reference")
+                    return false
+                }
+            }
+            Log.i(TAG, "gpu probe passed - drawing directly into the encoder surface")
+            return true
+        } catch (e: Exception) {
+            Log.w(TAG, "gpu probe failed (${e.javaClass.simpleName}: ${e.message}) - software path")
+            return false
+        } finally {
+            try {
+                probeSurface.release()
+            } catch (_: Exception) {
+            }
+            try {
+                tex.release()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /** Seek to tMs and draw the page into the probe surface (UI thread). */
+    private fun probeDraw(web: WebView, surface: Surface, frameRect: Rect, tMs: Double) {
+        val latch = CountDownLatch(1)
+        var err: Exception? = null
+        activity.runOnUiThread {
+            web.evaluateJavascript(JsContracts.seekJs(tMs)) { _ ->
+                try {
+                    val sc = surface.lockHardwareCanvas()
+                    sc.drawColor(VOID_COLOR)
+                    sc.save()
+                    sc.clipRect(frameRect)
+                    sc.translate(-frameRect.left.toFloat(), -frameRect.top.toFloat())
+                    web.draw(sc)
+                    sc.restore()
+                    surface.unlockCanvasAndPost(sc)
+                } catch (e: Exception) {
+                    err = e
+                } finally {
+                    latch.countDown()
+                }
+            }
+        }
+        if (!latch.await(10, TimeUnit.SECONDS)) {
+            throw RuntimeException("probe draw timed out at t=$tMs ms")
+        }
+        err?.let { throw it }
+    }
+
+    /** Software ground truth: seek to tMs, draw into a fresh bitmap
+     *  (UI thread, inside the seek callback - same discipline as render()). */
+    private fun probeReference(web: WebView, frameRect: Rect, tMs: Double, w: Int, h: Int): Bitmap {
+        val latch = CountDownLatch(1)
+        val ref = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        activity.runOnUiThread {
+            web.evaluateJavascript(JsContracts.seekJs(tMs)) { _ ->
+                val c = Canvas(ref)
+                c.drawColor(VOID_COLOR)
+                c.save()
+                c.clipRect(frameRect)
+                c.translate(-frameRect.left.toFloat(), -frameRect.top.toFloat())
+                web.draw(c)
+                c.restore()
+                latch.countDown()
+            }
+        }
+        if (!latch.await(10, TimeUnit.SECONDS)) {
+            throw RuntimeException("probe reference timed out at t=$tMs ms")
+        }
+        return ref
+    }
+
+    /**
+     * PixelCopy the most recently queued buffer of [surface] into a bitmap
+     * (Surface overload is API 24; minSdk is 26). Returns null on failure
+     * or timeout - callers treat that as "fast path unavailable".
+     */
+    private fun copySurface(surface: Surface, w: Int, h: Int): Bitmap? {
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val latch = CountDownLatch(1)
+        var result = -1
+        PixelCopy.request(
+            surface,
+            out,
+            { r ->
+                result = r
+                latch.countDown()
+            },
+            mainHandler
+        )
+        if (!latch.await(10, TimeUnit.SECONDS)) return null
+        return if (result == PixelCopy.SUCCESS) out else null
+    }
+
+    /**
+     * Compare a GPU-captured frame with its software reference. Sparse
+     * sampling (every 4th pixel in both axes - ~135k samples at 1080p)
+     * keeps the scan fast while still catching a blank frame, a wrong
+     * frame, or a stale/cached functor (frame 2 repeating frame 1).
+     * Antialiased edges may differ by rounding between the hw/sw paths,
+     * so up to 1% sampled-pixel mismatch is tolerated.
+     */
+    private fun framesAgree(a: Bitmap, b: Bitmap, w: Int, h: Int): Boolean {
+        val px = 4
+        var diff = 0
+        val total = ((w + px - 1) / px) * ((h + px - 1) / px)
+        for (y in 0 until h step px) {
+            for (x in 0 until w step px) {
+                if (a.getPixel(x, y) != b.getPixel(x, y)) diff++
+            }
+        }
+        val mismatch = diff.toDouble() / total
+        if (mismatch > 0.01) {
+            Log.w(TAG, "gpu probe: mismatch ratio " + mismatch)
+            return false
+        }
+        return true
     }
 
     /** Activity.onDestroy ONLY (pitfall 7.9) - never call mid-render. */

@@ -128,6 +128,18 @@ object JsContracts {
     fun textScaleJs(scale: Float): String =
         TEXT_SCALE_TEMPLATE.replace("ZV", String.format(java.util.Locale.US, "%.4f", scale))
 
+    // ENHANCE (render-time color grade): root CSS filter on <html> -
+    // saturate 1.18 then contrast 1.12, the exact math and apply order of
+    // the old native ColorMatrix path (saturation matrix, then 1.12x scale
+    // around mid-gray with -15.3 offset). Chromium's compositor applies
+    // it in the GPU draw; software draws get the same grade, so frame0.png
+    // QC and the software fallback stay pixel-matched with the video.
+    // ALWAYS written (on or off) - same leak rule as zoomJs.
+    fun enhanceJs(on: Boolean): String =
+        "(() => { document.documentElement.style.filter = '" +
+            (if (on) "saturate(1.18) contrast(1.12)" else "") +
+            "'; return 1; })()"
+
     // Auto-fit for non-conforming pages: content bounds in CSS px at t=0
     // (every visible element's getBoundingClientRect union, fixed included).
     // The engine contain-fits these into the CSS viewport - which mirrors the

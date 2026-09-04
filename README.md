@@ -23,7 +23,7 @@ Zoom and crop are applied as a CSS transform on the page itself, so content re-r
 
 ## ENHANCE - honest naming
 
-A native ColorMatrix color grade (contrast ~1.12 around mid-gray + saturation 1.18) applied per frame at native speed. It is deliberately NOT an AI model - the app stays zero-dependency and nothing ever leaves the device. frame0.png is exported with the same grade so QC still matches.
+A color grade (contrast ~1.12 around mid-gray + saturation 1.18) applied as a root CSS filter inside the GPU draw - identical math to the previous native ColorMatrix, still at native speed. It is deliberately NOT an AI model - the app stays zero-dependency and nothing ever leaves the device. frame0.png is exported with the same grade so QC still matches.
 
 ## HTML contract
 
@@ -35,6 +35,6 @@ A native ColorMatrix color grade (contrast ~1.12 around mid-gray + saturation 1.
 
 ## Hard rules (by design)
 
-- Never captures the screen: offscreen WebView, software layer, manually drawn per frame.
+- Never captures the screen: offscreen WebView, hardware layer, drawn manually per frame - GPU-direct into the encoder surface when a per-render probe validates it, CPU readback fallback otherwise.
 - Never upscales: AUTO framing must match the target within 2 px or fall back to manual; manual zoom/crop re-rasterizes the page instead of resampling pixels.
 - Corner detection is DOM geometry (the page reports its own rect), never vision.
