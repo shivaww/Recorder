@@ -59,13 +59,19 @@ paddle, market graph, locked vault, salary meter, tax form.
 
 
 ── RICH IMAGERY LADDER (per beat, pick the highest that fits) ──
-  1. Real photo / URL image (graded, Ken Burns)        strongest
-  2. Detailed filled illustration (gradient, glow)
+  1. Detailed character illustration (a posed, expressive figure/person -
+     real anatomy, clothing, lighting) or real photo/URL image (graded,
+     Ken Burns)                                              strongest
+  2. Detailed filled illustration of an object/environment (gradient, glow)
   3. Symbolic SCENE (environment + object + light)
   4. Data visualization (filled chart/meter/counter)
   5. Interface / system visualization (panel, flow)
-  6. Pure atmospheric abstraction (gradient/particles) weakest - floor only
+  6. Pure geometric/atmospheric abstraction (shapes, gradients, particles)
+     weakest - floor/background only, never the hero
 Never sit at rung 6 alone. Combine a rung 1-5 subject OVER a rung 6 floor.
+Geometric shapes (circles, bars, blobs) are texture and support, not the
+subject - if a beat calls for PERSON or EMOTION, draw an actual character,
+not a shape standing in for one.
 
 
 ── ANTI-TEMPLATE RULES ──
@@ -87,22 +93,22 @@ Never sit at rung 6 alone. Combine a rung 1-5 subject OVER a rung 6 floor.
    </head>
    <body>
      <div class="fit" id="video-frame">
-       <canvas id="fx" width="1920" height="1080"></canvas>  (optional FX)
-       <div class="stage">
-         <div class="safe">
-           <section class="shot" style="--in:0s"> ... x N
-         </div>
-       </div>
+       <section class="shot" style="--in:0s"> ... x N
      </div>
    </body>
    .fit CSS, verbatim:
    .fit{aspect-ratio:16/9;container-type:size;overflow:hidden;
         width:100vw;max-width:calc(100vh*16/9);margin:0 auto;
         position:relative;background:var(--void)}
+   .fit is the ONLY mandatory wrapper - no .stage/.safe/canvas#fx required.
+   Need canvas-driven FX? Add a <canvas> directly inside .fit as one more
+   child, sized to taste.
 
 2. CSS contract: sizes/gaps/font-size/stroke in cqh container units inside
    .fit (never px/vw/vh; exception: canvas width/height attrs).
-   .safe{position:absolute;inset:0 0 25% 0}   (bottom 25% = captions, empty)
+   Leave the bottom ~25% of every shot visually empty - captions render
+   there separately. No fixed class for this: just keep content out of
+   that zone.
    ONE Google Fonts <link>; any pairing (renderer-checked).
    The viewport meta is REQUIRED - without it the renderer's WebView falls
    back to a ~980px layout width and shrinks the frame inside the MP4.
@@ -171,10 +177,13 @@ as the only content.
 DENSITY: >=40% of the frame carries visible content or texture at any moment.
 A frame 80% flat black reads as "nothing happening" and compresses badly.
 HERO RULE: the primary subject of EVERY shot must be imagery-ladder rung 1-3
-(real photo / detailed filled illustration / symbolic scene). A thin outline
-or minimal icon may only be a small ACCENT - never the hero. If you catch
-yourself drawing a lone line-art symbol on black, stop and rebuild the shot
-with a rich hero + ambient floor.
+(character illustration / real photo / detailed filled illustration /
+symbolic scene). A thin outline, minimal icon, or plain geometric shape
+(circle/square/blob standing in for a person or object) may only be a small
+ACCENT - never the hero. If you catch yourself drawing a lone line-art
+symbol or an abstract shape where the beat calls for a person or object,
+stop and rebuild the shot with a real character/object hero + ambient
+floor.
 
 ── AUTHENTIC ASSETS - never fake official things ──
 Logos, brand marks, flags, official seals, currency, product shots,

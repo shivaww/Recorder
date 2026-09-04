@@ -100,7 +100,7 @@ class VideoEncoder(
         val info = MediaCodec.BufferInfo()
         var idlePolls = 0
         while (true) {
-            val idx = codec.dequeueOutputBuffer(info, 10_000L)
+            val idx = codec.dequeueOutputBuffer(info, if (endOfStream) 10_000L else 0L)
             when {
                 idx == MediaCodec.INFO_TRY_AGAIN_LATER -> {
                     if (!endOfStream) return
