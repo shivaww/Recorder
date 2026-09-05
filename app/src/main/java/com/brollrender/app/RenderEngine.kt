@@ -1,5 +1,6 @@
 package com.brollrender.app
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ContentValues
 import android.graphics.Bitmap
@@ -32,9 +33,10 @@ import java.util.concurrent.TimeUnit
 /**
  * Spec section 5 - the offscreen render engine.
  *
- * The WebView is attached INVISIBLE (never GONE), manually measured and laid
- * out at the exact output pixel size, HARDWARE-layered (GPU compositing for
- * full CSS filter/blend/canvas/WebGL support), and drawn INSIDE the evaluateJavascript callback of each seek -
+ * The WebView is attached GHOST-VISIBLE (bottom of the activity root,
+ * alpha 0.02, LAYER_TYPE_NONE), manually measured and laid
+ * out at the exact output pixel size, composited every frame (GPU
+ * compositing for full CSS filter/blend/canvas/WebGL support), and drawn INSIDE the evaluateJavascript callback of each seek -
  * GPU-direct into the encoder surface when the probe passes, into a
  * software bitmap (readback) otherwise (pitfalls
  * 7.1-7.3). The seek JS forces synchronous style+layout flush
@@ -98,6 +100,15 @@ class RenderEngine(private val activity: Activity) {
 
     private var webView: WebView? = null
 
+    /** Host for the ghost-visible WebView: the BOTTOM of MainActivity's
+     *  root - UI screens stack above it and own every touch. */
+    private var hostRoot: ViewGroup? = null
+
+    /** Call once after the activity's root exists, before the first prepare. */
+    fun attachRoot(r: ViewGroup) {
+        hostRoot = r
+    }
+
     /** PixelCopy completion listener thread (main looper; the copy itself
      *  is initiated from the render worker thread - never the UI thread). */
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -143,10 +154,12 @@ class RenderEngine(private val activity: Activity) {
 
     /**
      * Creates the offscreen WebView once and reuses it for later renders
-     * (acceptance 6). Attached via addContentView, INVISIBLE (never GONE),
-     * HARDWARE layer (GPU compositor), manually measured and laid out at
-     * exactly w x h px.
+     * (acceptance 6). GHOST-VISIBLE in the activity's root (alpha 0.02,
+     * LAYER_TYPE_NONE - see the class doc: a composited frame must exist
+     * for the GL draw path), manually measured and laid out at exactly
+     * w x h px.
      */
+    @SuppressLint("ClickableViewAccessibility")
     private fun obtainWebView(w: Int, h: Int): WebView {
         webView?.let { web ->
             // Reused for a later render at a (possibly different) output size
@@ -198,9 +211,28 @@ class RenderEngine(private val activity: Activity) {
             // a software bitmap (synchronous GPU->CPU readback fallback); the
             // seek JS forces reflow before the draw.
             web.setInitialScale(100) // no auto-scaling; 1 CSS px = 1 dp
-            web.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-            activity.addContentView(web, FrameLayout.LayoutParams(w, h))
-            web.visibility = View.INVISIBLE
+            // GHOST-VISIBLE placement (fix for the void-functor evidence:
+            // probe dump hw = 11 KB uniform void vs 588 KB full reference).
+            // A hardware-canvas web.draw() executes the GL functor, which
+            // draws the COMPOSITED frame - and a compositor frame only
+            // exists for an attached VISIBLE view. INVISIBLE + forced
+            // LAYER_TYPE_HARDWARE = content parked in an FBO that never
+            // refreshes = the functor paints void. So: LAYER_TYPE_NONE (the
+            // WebView manages its own hardware path), alpha 0.02 (invisible
+            // under the UI, still composited), and the view sits at the
+            // BOTTOM of the activity's root so the UI owns all touches.
+            web.setLayerType(View.LAYER_TYPE_NONE, null)
+            web.alpha = 0.02f
+            web.isFocusable = false
+            web.isFocusableInTouchMode = false
+            // Swallow any touch that falls through the UI above: the page
+            // must never react to taps while it renders behind the screens.
+            web.setOnTouchListener { _, _ -> true }
+            val lp = FrameLayout.LayoutParams(w, h)
+            val host = hostRoot
+            if (host != null) host.addView(web, 0, lp)
+            else activity.addContentView(web, lp)
+            web.visibility = View.VISIBLE
             web.measure(
                 View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY)
@@ -566,6 +598,7 @@ class RenderEngine(private val activity: Activity) {
         ambienceType: String? = null,
         ambienceGain: Float = 0.25f,
         textScale: Float = 1f,
+        allowGpu: Boolean = true,
         onProgress: (frameNo: Int, total: Int, rateFps: Double, etaSec: Long) -> Unit,
         onStats: ((stats: String) -> Unit)? = null,
         isPaused: () -> Boolean = { false },
@@ -642,7 +675,16 @@ class RenderEngine(private val activity: Activity) {
             // FAST PATH: draw the page straight into the encoder's input
             // surface (GL-to-GL, no CPU round trip). gpuProbe() validates
             // it once per render; any failure falls back to software below.
-            val probe = gpuProbe(web, frameRect, fps, totalFrames)
+            // Overnight / screen-off renders force the CPU pipeline BY
+            // DESIGN: the GPU functor draws the composited frame, and with
+            // no active display pipeline there is nothing to composite -
+            // the fast path would bake void frames into the video. Foreground
+            // single renders probe the (now ghost-visible) GPU normally.
+            val probe = if (allowGpu) {
+                gpuProbe(web, frameRect, fps, totalFrames)
+            } else {
+                ProbeInfo(false, false, "gpu off (overnight mode)")
+            }
             if (probe.warmDraw) {
                 // The loop's warm primitive: an ImageReader-backed hardware
                 // surface (same lockHardwareCanvas mechanism as the capture

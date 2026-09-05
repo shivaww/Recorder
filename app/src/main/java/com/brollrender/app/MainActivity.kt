@@ -109,6 +109,11 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         engine = RenderEngine(this)
         root = FrameLayout(this)
+        // The engine's WebView renders GHOST-VISIBLE at the BOTTOM of this
+        // root: attached + composited (required for the GPU draw path),
+        // invisible under the UI at 2% alpha, touches swallowed by the
+        // engine. UI screens stack above it and own all interaction.
+        engine.attachRoot(root)
         root.setBackgroundColor(VOID)
         setContentView(root)
         // Purge block files orphaned by a previous session.
@@ -1165,6 +1170,7 @@ class MainActivity : Activity() {
                     ambienceType = ok.ambienceType,
                     ambienceGain = ok.ambienceGain,
                     textScale = 1f,
+                    allowGpu = false, // overnight: screen off = no compositor
                     onStats = { s -> runOnUiThread { updateRenderStats(s) } },
                     onProgress = { f, t, rate, eta ->
                         runOnUiThread { updateRenderProgress(f, t, rate, eta) }
