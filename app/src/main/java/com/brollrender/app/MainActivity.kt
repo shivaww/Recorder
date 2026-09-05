@@ -104,6 +104,9 @@ class MainActivity : Activity() {
 
     private lateinit var root: FrameLayout
     private lateinit var engine: RenderEngine
+    /** Foreground UI only. The renderer owns a separate, persistent child at
+     * index 0; never remove it during a screen transition. */
+    private var currentScreen: View? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -148,7 +151,12 @@ class MainActivity : Activity() {
     }
 
     private fun showScreen(v: View) {
-        root.removeAllViews()
+        // Do NOT call root.removeAllViews(): the renderer's ghost-visible
+        // WebView is a sibling beneath this UI. Removing it detaches
+        // Chromium from the window, which prevents compositor commits and
+        // makes GPU capture return stale/blank frames (or time out waiting
+        // for postVisualStateCallback).
+        currentScreen?.let { root.removeView(it) }
         root.addView(
             v,
             FrameLayout.LayoutParams(
@@ -156,6 +164,7 @@ class MainActivity : Activity() {
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
         )
+        currentScreen = v
     }
 
     private fun dp(v: Int): Int = (resources.displayMetrics.density * v).roundToInt()
@@ -625,6 +634,11 @@ class MainActivity : Activity() {
     // Section 8.2: validation failure = the specific error + what to check.
     private fun showErrorScreen(message: String) {
         val pad = dp(20)
+        val validationHint =
+            "check: the HTML needs a .fit (16:9) element containing .stage, " +
+                "CSS keyframe animations, and webfonts that load"
+        val renderHint =
+            "renderer timeout: retry the render. This is not an HTML validation error."
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
@@ -636,8 +650,7 @@ class MainActivity : Activity() {
         col.addView(spacer(dp(12)))
         col.addView(
             monoTv(
-                "check: the HTML needs a .fit (16:9) element containing .stage, " +
-                    "CSS keyframe animations, and webfonts that load",
+                if (message.startsWith("render failed:")) renderHint else validationHint,
                 12,
                 TXT2
             )

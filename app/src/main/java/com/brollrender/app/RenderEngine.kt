@@ -509,14 +509,15 @@ class RenderEngine(private val activity: Activity) {
                 }
             }
 
-            // t=0 thumbnail - same seek+visual-commit discipline as the loop.
+            // A bitmap thumbnail is the proven CPU path. It does not need a
+            // compositor callback (and must keep working if the GPU path is
+            // unavailable on this device).
             val thumb = Bitmap.createBitmap(THUMB_W, THUMB_H, Bitmap.Config.ARGB_8888)
             val thumbLatch = CountDownLatch(1)
             var thumbError: Exception? = null
             activity.runOnUiThread {
-                seekAndCommit(web, 0.0) { seekError ->
+                web.evaluateJavascript(JsContracts.seekJs(0.0)) {
                     try {
-                        seekError?.let { throw it }
                         val c = Canvas(thumb)
                         c.drawColor(VOID_COLOR)
                         c.scale(THUMB_W.toFloat() / targetW, THUMB_H.toFloat() / targetH)
@@ -967,9 +968,8 @@ class RenderEngine(private val activity: Activity) {
                     var drawError: Exception? = null
                     val latch = CountDownLatch(1)
                     activity.runOnUiThread {
-                        seekAndCommit(web, f * 1000.0 / fps) { seekError ->
+                        web.evaluateJavascript(JsContracts.seekJs(f * 1000.0 / fps)) {
                             try {
-                                seekError?.let { throw it }
                                 val c = Canvas(frameBmp)
                                 c.drawColor(VOID_COLOR)
                                 if (!full) {
@@ -1382,9 +1382,8 @@ class RenderEngine(private val activity: Activity) {
         val ref = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         var err: Exception? = null
         activity.runOnUiThread {
-            seekAndCommit(web, tMs) { seekError ->
+            web.evaluateJavascript(JsContracts.seekJs(tMs)) {
                 try {
-                    seekError?.let { throw it }
                     val c = Canvas(ref)
                     c.drawColor(VOID_COLOR)
                     c.save()
