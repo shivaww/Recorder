@@ -714,18 +714,26 @@ class RenderEngine(private val activity: Activity) {
             val full = frameRect.left <= 0 && frameRect.top <= 0 &&
                 frameRect.right >= w && frameRect.bottom >= h
 
+            // Windowed progress: a cumulative-average rate (frames / total
+            // elapsed) starts near 0.2 f/s because the first seconds
+            // amortize the audio mix/encode and the GPU probe - a lie about
+            // the render's real speed and an absurd ETA. The rate is now the
+            // last-30-frame window, with the baseline taken AFTER the probe
+            // so warm-up cost never pollutes it.
+            var lastReportT = System.currentTimeMillis()
+            var lastReportF = 0
             fun report(f: Int) {
                 if (f % 30 == 0 || f == totalFrames - 1) {
-                    val elapsed = (System.currentTimeMillis() - t0) / 1000.0
-                    // f >= 2: skip the meaningless first-frame snapshot -
-                    // its rate is dominated by audio-encode + GPU-probe
-                    // warm-up and produced absurd ETAs (1000+ min at frame 1).
-                    if (elapsed > 0.5 && f >= 2) {
-                        val doneCount = f + 1
-                        val rate = doneCount / elapsed
-                        val eta = if (rate > 0) ((totalFrames - doneCount) / rate).toLong() else -1L
-                        onProgress(doneCount, totalFrames, rate, eta)
+                    if (f > lastReportF) {
+                        val dt = ((System.currentTimeMillis() - lastReportT) / 1000.0)
+                            .coerceAtLeast(0.001)
+                        val rate = (f - lastReportF) / dt
+                        val remaining = totalFrames - f - 1
+                        val eta = if (rate > 0) (remaining / rate).toLong() else -1L
+                        onProgress(f + 1, totalFrames, rate, eta)
                     }
+                    lastReportT = System.currentTimeMillis()
+                    lastReportF = f
                 }
             }
 

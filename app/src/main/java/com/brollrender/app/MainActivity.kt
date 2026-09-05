@@ -485,6 +485,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
         }
+        col.setBackgroundColor(VOID) // opaque over the ghost WebView
         col.addView(monoTv(message, 14, AMBER))
         col.addView(spacer(dp(12)))
         col.addView(ProgressBar(this))
@@ -1000,6 +1001,13 @@ class MainActivity : Activity() {
             setPadding(pad, pad, pad, pad)
             gravity = Gravity.CENTER_VERTICAL
         }
+        // OPAQUE background: this screen stays up for the whole render with
+        // the ghost WebView behind it. An opaque void background lets the
+        // RenderThread occlusion-cull the ghost's on-screen composite, so
+        // that GPU slice goes to the functor + encoder instead. The GPU
+        // probe validated the fast path WITH this screen up, so the gate
+        // covers the culling; same void color, zero visual change.
+        col.setBackgroundColor(VOID)
         col.addView(monoTv(title, 16, AMBER, true))
         col.addView(monoTv("${resW}x${resH} @ ${fps}fps · ${durationSec}s", 12, TXT2))
         col.addView(spacer(dp(14)))
