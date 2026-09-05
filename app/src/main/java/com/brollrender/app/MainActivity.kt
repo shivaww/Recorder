@@ -485,7 +485,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
         }
-        col.setBackgroundColor(VOID) // opaque over the ghost WebView
+        // Transparent: keep the ghost WebView's on-screen composite alive.
         col.addView(monoTv(message, 14, AMBER))
         col.addView(spacer(dp(12)))
         col.addView(ProgressBar(this))
@@ -1001,13 +1001,12 @@ class MainActivity : Activity() {
             setPadding(pad, pad, pad, pad)
             gravity = Gravity.CENTER_VERTICAL
         }
-        // OPAQUE background: this screen stays up for the whole render with
-        // the ghost WebView behind it. An opaque void background lets the
-        // RenderThread occlusion-cull the ghost's on-screen composite, so
-        // that GPU slice goes to the functor + encoder instead. The GPU
-        // probe validated the fast path WITH this screen up, so the gate
-        // covers the culling; same void color, zero visual change.
-        col.setBackgroundColor(VOID)
+        // Transparent on purpose (occlusion-cull gamble reverted): the
+        // ghost WebView's ON-SCREEN composite behind this screen is
+        // plausibly what feeds the GL functor's content - the GPU draw
+        // path reads the composited frame. An opaque screen would let the
+        // RenderThread cull it. The e2e gate now decides GPU vs CPU; this
+        // screen must not influence that decision.
         col.addView(monoTv(title, 16, AMBER, true))
         col.addView(monoTv("${resW}x${resH} @ ${fps}fps · ${durationSec}s", 12, TXT2))
         col.addView(spacer(dp(14)))

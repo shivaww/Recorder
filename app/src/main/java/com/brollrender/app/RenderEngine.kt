@@ -9,6 +9,8 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.SurfaceTexture
 import android.media.ImageReader
+import android.media.MediaMetadataRetriever
+import android.os.Build
 import android.os.Debug
 import android.os.Handler
 import android.os.Looper
@@ -680,10 +682,30 @@ class RenderEngine(private val activity: Activity) {
             // no active display pipeline there is nothing to composite -
             // the fast path would bake void frames into the video. Foreground
             // single renders probe the (now ghost-visible) GPU normally.
-            val probe = if (allowGpu) {
+            var probe = if (allowGpu) {
                 gpuProbe(web, frameRect, fps, totalFrames)
             } else {
                 ProbeInfo(false, false, "gpu off (overnight mode)")
+            }
+            // END-TO-END GATE (the blank-video lesson): the surface probe
+            // above validates a PROXY - a SurfaceTexture buffer read back
+            // through PixelCopy, which SYNCHRONIZES the copy. The render loop
+            // feeds the ENCODER input surface, whose buffers MediaCodec
+            // consumes as queued - and on a real device those two paths
+            // diverged: proxy passed, actual MP4 came out blank (audio fine).
+            // The fast path is now enabled only when the ARTIFACT itself
+            // verifies: e2eGpuProbe draws two frames through the EXACT loop
+            // primitives into a throwaway encoder, decodes the mini MP4,
+            // and compares the DECODED pixels with ground truth. A blank or
+            // wrong video cannot pass this gate.
+            if (probe.direct) {
+                val e2e = e2eGpuProbe(web, frameRect, fps, totalFrames, probe.warmDraw)
+                if (e2e != null) {
+                    Log.w(TAG, "gpu e2e gate: $e2e - staying on the CPU pipeline")
+                    probe = ProbeInfo(false, false, "e2e: $e2e")
+                } else {
+                    Log.i(TAG, "gpu e2e gate passed - decoded probe frames match")
+                }
             }
             if (probe.warmDraw) {
                 // The loop's warm primitive: an ImageReader-backed hardware
@@ -965,16 +987,142 @@ class RenderEngine(private val activity: Activity) {
     }
 
     /**
-     * One-shot validation of the GPU-direct frame path. Two mid-timeline
-     * seeks are drawn both ways - into a throwaway SurfaceTexture-backed
-     * surface (the exact lockHardwareCanvas path the render loop uses) and
-     * into a software bitmap (ground truth) - then compared. Any throw,
-     * PixelCopy failure, blank GPU frame, or content mismatch (including a
-     * stale/cached functor, where the second GPU frame would repeat the
-     * first) downgrades the whole render to the software pipeline. The
-     * encoder's surface is never touched: a probe frame must never reach
-     * the video stream. Runs on the render worker thread.
+     * END-TO-END fast-path gate - the blank-video lesson. The surface probe
+     * above validates a PROXY: a SurfaceTexture buffer read back through
+     * PixelCopy, which synchronizes the copy. The render loop instead feeds
+     * the ENCODER input surface, whose buffers MediaCodec consumes as queued
+     * - and on a real device those two paths diverged (proxy passed, actual
+     * MP4 blank, audio intact). This gate verifies the ARTIFACT: two
+     * mid-timeline frames are drawn through the EXACT loop primitives
+     * (seek-callback discipline, lockHardwareCanvas, warm draw when
+     * required) into a throwaway H.264 encoder, the mini MP4 is decoded
+     * back, and the DECODED pixels are compared with software ground truth
+     * (hwMatchesRef). GPU-direct runs only if the decoded video actually
+     * contains the page. Returns null = pass, else the failure reason
+     * (surfaced on the RENDER screen, with diagnostic dumps on failure).
      */
+    private fun e2eGpuProbe(web: WebView, frameRect: Rect, fps: Int, totalFrames: Int, warm: Boolean): String? {
+        val w = outW
+        val h = outH
+        val tmp = File(activity.cacheDir, "gpu_e2e_probe.mp4")
+        tmp.delete()
+        var enc: VideoEncoder? = null
+        var warmReader: ImageReader? = null
+        try {
+            enc = VideoEncoder(w, h, fps, 16_000_000, tmp, null, emptyList())
+            enc.start()
+            val s = enc.inputSurface ?: return "probe encoder produced no surface"
+            var warmSurface: Surface? = null
+            if (warm) {
+                try {
+                    warmReader = ImageReader.newInstance(w, h, android.graphics.PixelFormat.RGBA_8888, 2)
+                    warmSurface = warmReader.surface
+                } catch (_: Exception) {
+                    warmSurface = null
+                }
+            }
+            val f1 = (totalFrames / 3).coerceAtLeast(1)
+            val f2 = (2 * totalFrames / 3).coerceAtLeast(f1 + 1)
+            val t1 = f1 * 1000.0 / fps
+            val t2 = f2 * 1000.0 / fps
+            val full = frameRect.left <= 0 && frameRect.top <= 0 &&
+                frameRect.right >= w && frameRect.bottom >= h
+            for (pair in listOf(t1 to "t1", t2 to "t2")) {
+                val tMs = pair.first
+                val at = pair.second
+                val latch = CountDownLatch(1)
+                var err: Exception? = null
+                activity.runOnUiThread {
+                    web.evaluateJavascript(JsContracts.seekJs(tMs)) { _ ->
+                        try {
+                            warmSurface?.let { ws ->
+                                val wc = ws.lockHardwareCanvas()
+                                wc.drawColor(VOID_COLOR)
+                                web.draw(wc)
+                                ws.unlockCanvasAndPost(wc)
+                                try { warmReader?.acquireLatestImage()?.close() } catch (_: Exception) {}
+                            }
+                            val sc = s.lockHardwareCanvas()
+                            sc.drawColor(VOID_COLOR)
+                            if (!full) {
+                                sc.save()
+                                sc.clipRect(frameRect)
+                                sc.translate(-frameRect.left.toFloat(), -frameRect.top.toFloat())
+                                web.draw(sc)
+                                sc.restore()
+                            } else {
+                                web.draw(sc)
+                            }
+                            s.unlockCanvasAndPost(sc)
+                        } catch (e: Exception) {
+                            err = e
+                        } finally {
+                            latch.countDown()
+                        }
+                    }
+                }
+                if (!latch.await(10, TimeUnit.SECONDS)) return "draw timed out at $at"
+                err?.let { return "draw failed at $at: ${it.message}" }
+                enc.drain(false)
+            }
+            enc.signalEos()
+            enc.drain(true)
+            enc.release()
+            enc = null
+            // Decode the artifact back and compare the DECODED pixels.
+            val rec = MediaMetadataRetriever()
+            try {
+                rec.setDataSource(tmp.absolutePath)
+                val strideUs = 1_000_000L / fps
+                val checks = if (Build.VERSION.SDK_INT >= 27) {
+                    listOf(0L to "t1", strideUs to "t2")
+                } else {
+                    listOf(0L to "t1") // API 26: exact seeking unavailable; frame 0 only
+                }
+                for (pair in checks) {
+                    val us = pair.first
+                    val at = pair.second
+                    val dec = try {
+                        rec.getFrameAtTime(
+                            us,
+                            if (Build.VERSION.SDK_INT >= 27) MediaMetadataRetriever.OPTION_CLOSEST
+                            else MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                        )
+                    } catch (e: Exception) {
+                        null
+                    }
+                    if (dec == null) return "decode returned nothing at $at"
+                    val ref = probeReference(web, frameRect, if (at == "t1") t1 else t2, w, h)
+                    if (!hwMatchesRef(dec, ref, w, h)) {
+                        dumpProbePng("e2e_dec_$at", dec)
+                        dumpProbePng("e2e_ref_$at", ref)
+                        val mm = framesAgreeRatio(dec, ref, w, h)
+                        return "decoded frame mismatch " + (mm * 100).toInt() + "% at $at"
+                    }
+                }
+                return null
+            } finally {
+                try {
+                    rec.release()
+                } catch (_: Exception) {
+                }
+                tmp.delete()
+            }
+        } catch (e: Exception) {
+            return "e2e threw: " + e.javaClass.simpleName
+        } finally {
+            try {
+                enc?.release()
+            } catch (_: Exception) {
+            }
+            try {
+                warmReader?.close()
+            } catch (_: Exception) {
+            }
+            tmp.delete()
+        }
+    }
+
     /** GPU-direct validation outcome. */
     private class ProbeInfo(
         val direct: Boolean,    // run the GPU-direct frame chain
