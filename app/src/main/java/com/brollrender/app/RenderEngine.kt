@@ -38,11 +38,13 @@ import java.util.concurrent.TimeUnit
  * The WebView is attached GHOST-VISIBLE (bottom of the activity root,
  * alpha 0.02, LAYER_TYPE_NONE), manually measured and laid
  * out at the exact output pixel size, composited every frame (GPU
- * compositing for full CSS filter/blend/canvas/WebGL support), and drawn INSIDE the evaluateJavascript callback of each seek -
+ * compositing for full CSS filter/blend/canvas/WebGL support), and drawn only
+ * after Chromium confirms each seek's visual state has committed -
  * GPU-direct into the encoder surface when the probe passes, into a
  * software bitmap (readback) otherwise (pitfalls
  * 7.1-7.3). The seek JS forces synchronous style+layout flush
- * (document.body.offsetHeight) so the draw captures the correct frame.
+ * (document.body.offsetHeight); postVisualStateCallback then closes the
+ * compositor race before the draw.
  * Driven from a worker thread; every WebView touch is posted to the UI
  * thread and latched back, so any deadlock converts into a clean timeout
  * abort (pitfall 7.13).
@@ -114,6 +116,7 @@ class RenderEngine(private val activity: Activity) {
     /** PixelCopy completion listener thread (main looper; the copy itself
      *  is initiated from the render worker thread - never the UI thread). */
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var visualStateRequestId = 0L
 
     /**
      * evaluateJavascript results are JSON-ENCODED (spec section 3), and the
@@ -152,6 +155,29 @@ class RenderEngine(private val activity: Activity) {
             throw RuntimeException("JS eval timed out (${timeoutSec}s): ${script.take(48)}")
         }
         return out
+    }
+
+    /**
+     * Seek the page and wait until Chromium has committed that DOM state to
+     * its visual pipeline.  evaluateJavascript() only says that the JS ran;
+     * it does not mean a hardware-canvas draw will see the new animation
+     * time.  Drawing immediately after it was the source of occasional
+     * previous/wrong frames in the direct GPU path.
+     *
+     * This is deliberately asynchronous because it is called from the UI
+     * thread.  Callers already own their own completion latch/state.
+     */
+    private fun seekAndCommit(web: WebView, tMs: Double, done: (Exception?) -> Unit) {
+        web.evaluateJavascript(JsContracts.seekJs(tMs)) {
+            try {
+                val requestId = ++visualStateRequestId
+                web.postVisualStateCallback(requestId, object : WebView.VisualStateCallback() {
+                    override fun onComplete(id: Long) = done(null)
+                })
+            } catch (e: Exception) {
+                done(e)
+            }
+        }
     }
 
     /**
@@ -351,6 +377,15 @@ class RenderEngine(private val activity: Activity) {
                     fontsWarning =
                         "webfonts not loaded - allow internet once (look may differ)"
                 }
+                // A page which explicitly requested a webfont must never be
+                // rendered with Android's fallback font.  Fallback glyph
+                // widths change line breaks and make titles look squeezed
+                // compared with Chrome.  Stop here rather than baking a
+                // knowingly different video; a retry after one connected
+                // preview uses WebView's cache normally.
+                if (lastFams != null && lastFams.length() > 0) {
+                    return PrepareResult.Fail("$fontsWarning; retry after the fonts finish loading")
+                }
             } else {
                 fontsDetail = lastFams?.let { f ->
                     (0 until f.length()).joinToString(", ") { f.optString(it) }
@@ -474,21 +509,29 @@ class RenderEngine(private val activity: Activity) {
                 }
             }
 
-            // t=0 thumbnail - same draw-inside-callback discipline as the loop.
+            // t=0 thumbnail - same seek+visual-commit discipline as the loop.
             val thumb = Bitmap.createBitmap(THUMB_W, THUMB_H, Bitmap.Config.ARGB_8888)
             val thumbLatch = CountDownLatch(1)
+            var thumbError: Exception? = null
             activity.runOnUiThread {
-                web.evaluateJavascript(JsContracts.seekJs(0.0)) { _ ->
-                    val c = Canvas(thumb)
-                    c.drawColor(VOID_COLOR)
-                    c.scale(THUMB_W.toFloat() / targetW, THUMB_H.toFloat() / targetH)
-                    web.draw(c)
-                    thumbLatch.countDown()
+                seekAndCommit(web, 0.0) { seekError ->
+                    try {
+                        seekError?.let { throw it }
+                        val c = Canvas(thumb)
+                        c.drawColor(VOID_COLOR)
+                        c.scale(THUMB_W.toFloat() / targetW, THUMB_H.toFloat() / targetH)
+                        web.draw(c)
+                    } catch (e: Exception) {
+                        thumbError = e
+                    } finally {
+                        thumbLatch.countDown()
+                    }
                 }
             }
             if (!thumbLatch.await(10, TimeUnit.SECONDS)) {
                 return PrepareResult.Fail("thumbnail draw timed out")
             }
+            thumbError?.let { return PrepareResult.Fail("thumbnail draw failed: ${it.message}") }
 
             return PrepareResult.Ok(
                 thumb,
@@ -774,8 +817,8 @@ class RenderEngine(private val activity: Activity) {
 
             if (gpuDirect) {
                 // ===== FAST PATH: self-driven frame chain =====
-                // The seek callback for frame N draws N and issues the seek
-                // for N+1 from inside the same callback, all on the UI
+                // The committed visual callback for frame N draws N and
+                // issues the seek for N+1 from inside the same callback, all on the UI
                 // thread - no worker<->UI ping-pong per frame. This thread
                 // never touches frames: it is the codec drain + watchdog
                 // thread (section 6 - only this thread drains), and
@@ -786,10 +829,13 @@ class RenderEngine(private val activity: Activity) {
                 val st = LoopState()
                 fun drawFrame(f: Int) {
                     if (st.stop) return
-                    web.evaluateJavascript(JsContracts.seekJs(f * 1000.0 / fps)) { _ ->
-                        // Draw INSIDE this callback - the seek is guaranteed
-                        // applied on this same UI-thread pass (pitfall 7.3).
-                        if (st.stop) return@evaluateJavascript
+                    seekAndCommit(web, f * 1000.0 / fps) { seekError ->
+                        if (st.stop) return@seekAndCommit
+                        if (seekError != null) {
+                            st.error = seekError
+                            st.stop = true
+                            return@seekAndCommit
+                        }
                         try {
                             warmSurface?.let { ws ->
                                 // Stale-functor fix (probe-validated): a warm
@@ -921,8 +967,9 @@ class RenderEngine(private val activity: Activity) {
                     var drawError: Exception? = null
                     val latch = CountDownLatch(1)
                     activity.runOnUiThread {
-                        web.evaluateJavascript(JsContracts.seekJs(f * 1000.0 / fps)) { _ ->
+                        seekAndCommit(web, f * 1000.0 / fps) { seekError ->
                             try {
+                                seekError?.let { throw it }
                                 val c = Canvas(frameBmp)
                                 c.drawColor(VOID_COLOR)
                                 if (!full) {
@@ -1033,8 +1080,9 @@ class RenderEngine(private val activity: Activity) {
                 val latch = CountDownLatch(1)
                 var err: Exception? = null
                 activity.runOnUiThread {
-                    web.evaluateJavascript(JsContracts.seekJs(tMs)) { _ ->
+                    seekAndCommit(web, tMs) { seekError ->
                         try {
+                            seekError?.let { throw it }
                             warmSurface?.let { ws ->
                                 val wc = ws.lockHardwareCanvas()
                                 wc.drawColor(VOID_COLOR)
@@ -1269,8 +1317,9 @@ class RenderEngine(private val activity: Activity) {
         val latch = CountDownLatch(1)
         var err: Exception? = null
         activity.runOnUiThread {
-            web.evaluateJavascript(JsContracts.seekJs(tMs)) { _ ->
+            seekAndCommit(web, tMs) { seekError ->
                 try {
+                    seekError?.let { throw it }
                     val wc = warmSurface.lockHardwareCanvas()
                     wc.drawColor(VOID_COLOR)
                     web.draw(wc)
@@ -1302,8 +1351,9 @@ class RenderEngine(private val activity: Activity) {
         val latch = CountDownLatch(1)
         var err: Exception? = null
         activity.runOnUiThread {
-            web.evaluateJavascript(JsContracts.seekJs(tMs)) { _ ->
+            seekAndCommit(web, tMs) { seekError ->
                 try {
+                    seekError?.let { throw it }
                     val sc = surface.lockHardwareCanvas()
                     sc.drawColor(VOID_COLOR)
                     sc.save()
@@ -1330,21 +1380,29 @@ class RenderEngine(private val activity: Activity) {
     private fun probeReference(web: WebView, frameRect: Rect, tMs: Double, w: Int, h: Int): Bitmap {
         val latch = CountDownLatch(1)
         val ref = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        var err: Exception? = null
         activity.runOnUiThread {
-            web.evaluateJavascript(JsContracts.seekJs(tMs)) { _ ->
-                val c = Canvas(ref)
-                c.drawColor(VOID_COLOR)
-                c.save()
-                c.clipRect(frameRect)
-                c.translate(-frameRect.left.toFloat(), -frameRect.top.toFloat())
-                web.draw(c)
-                c.restore()
-                latch.countDown()
+            seekAndCommit(web, tMs) { seekError ->
+                try {
+                    seekError?.let { throw it }
+                    val c = Canvas(ref)
+                    c.drawColor(VOID_COLOR)
+                    c.save()
+                    c.clipRect(frameRect)
+                    c.translate(-frameRect.left.toFloat(), -frameRect.top.toFloat())
+                    web.draw(c)
+                    c.restore()
+                } catch (e: Exception) {
+                    err = e
+                } finally {
+                    latch.countDown()
+                }
             }
         }
         if (!latch.await(10, TimeUnit.SECONDS)) {
             throw RuntimeException("probe reference timed out at t=$tMs ms")
         }
+        err?.let { throw it }
         return ref
     }
 
@@ -1398,20 +1456,15 @@ class RenderEngine(private val activity: Activity) {
      *  1. exact sparse ratio <= MISMATCH_TOL (strictest, no doubt);
      *  2. tolerant ratio (per-channel +-16) at the best of +-2 px shifts -
      *     passes legit raster noise and 1-px offsets;
-     *  3. structural: center-crop luma similarity >= 0.97 AND the hw frame
-     *     is not uniform AND its detail energy is >= 75% of the reference
-     *     (the detail guard rejects a functor rendering soft/low-res output
-     *     that would look similar downscaled - quality is never traded for
-     *     speed).
-     * Blank, stale, and wrong-content frames never pass: uniformity and
-     * staleness are checked by the caller before structural acceptance.
+     * A downsampled structural comparison used to be a third fallback here.
+     * It could accept a frame with the right broad shapes but squeezed text
+     * or a different layout scale.  This gate is about artifact fidelity, so
+     * such a device must use the readback path instead of trading accuracy
+     * for the GPU speedup.
      */
     private fun hwMatchesRef(g: Bitmap, r: Bitmap, w: Int, h: Int): Boolean {
         if (framesAgreeRatio(g, r, w, h) <= MISMATCH_TOL) return true
-        if (tolerantBestRatio(g, r, w, h) <= MISMATCH_TOL) return true
-        if (isUniform(g)) return false
-        if (centerLumaSimilarity(g, r) < 0.97) return false
-        return detailOk(g, r, w, h)
+        return tolerantBestRatio(g, r, w, h) <= MISMATCH_TOL
     }
 
     /** Tolerant sparse mismatch at the best of +-2 px shifts (both axes):

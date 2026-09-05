@@ -195,6 +195,22 @@ object JsContracts {
             }
             return { fam: fam, weights: weights };
           };
+          // FontFaceSet.check() may report true when Chromium can render the
+          // test string with a fallback face.  That is not sufficient for a
+          // renderer: fallback metrics squeeze/wrap copy differently from
+          // Chrome.  Require a *loaded registered* FontFace for each family
+          // and requested weight instead.
+          const clean = (s) => String(s).trim().replace(/^['"]|['"]$/g, '').toLowerCase();
+          const loadedFace = (family, weight) => {
+            const wanted = +weight;
+            return Array.from(document.fonts).some((face) => {
+              if (face.status !== 'loaded' || clean(face.family) !== clean(family)) return false;
+              const nums = String(face.weight).match(/\d{3}/g);
+              if (!nums || !nums.length) return true;
+              const lo = +nums[0], hi = +(nums[1] || nums[0]);
+              return wanted >= lo && wanted <= hi;
+            });
+          };
           document.querySelectorAll('link[href*="fonts.googleapis"]').forEach((l) => {
             (l.href.match(/family=[^&]+/g) || []).forEach((m) => {
               const p = parseSpec(m);
@@ -202,10 +218,7 @@ object JsContracts {
               fams.push(p.fam);
               let ok = true;
               p.weights.forEach((w) => {
-                if (!document.fonts.check(w + ' 16px "' + p.fam + '"') &&
-                    !document.fonts.check('italic ' + w + ' 16px "' + p.fam + '"')) {
-                  ok = false;
-                }
+                if (!loadedFace(p.fam, w)) ok = false;
               });
               checks[p.fam] = ok;
             });
