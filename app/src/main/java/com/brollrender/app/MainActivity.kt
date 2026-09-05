@@ -110,9 +110,9 @@ class MainActivity : Activity() {
     private var currentScreen: View? = null
 
     // REMOTE (Kaggle) state
-    private lateinit var securePrefs: remote.SecurePrefs
-    private lateinit var jobStore: remote.JobStore
-    private val remoteJobs = mutableListOf<remote.JobStore.JobMeta>()
+    private lateinit var securePrefs: SecurePrefs
+    private lateinit var jobStore: JobStore
+    private val remoteJobs = mutableListOf<JobStore.JobMeta>()
     @Volatile private var remotePolling = false
     private var remotePollThread: Thread? = null
 
@@ -130,8 +130,8 @@ class MainActivity : Activity() {
         // Purge block files orphaned by a previous session.
         blockDir().deleteRecursively()
         // Init remote render state
-        securePrefs = remote.SecurePrefs(this)
-        jobStore = remote.JobStore(this)
+        securePrefs = SecurePrefs(this)
+        jobStore = JobStore(this)
         remoteJobs.addAll(jobStore.loadAll())
         showPickScreen()
     }
@@ -1545,9 +1545,9 @@ class MainActivity : Activity() {
             col.addView(spacer(dp(16)))
         }
 
-        addScriptBlock("STEP 1: Install Essentials", remote.KaggleScripts.step1)
-        addScriptBlock("STEP 2: Download Cloudflared", remote.KaggleScripts.step2)
-        addScriptBlock("STEP 3: Launch Server", remote.KaggleScripts.step3)
+        addScriptBlock("STEP 1: Install Essentials", KaggleScripts.step1)
+        addScriptBlock("STEP 2: Download Cloudflared", KaggleScripts.step2)
+        addScriptBlock("STEP 3: Launch Server", KaggleScripts.step3)
         
         col.addView(mkButton("CONTINUE TO KAGGLE RENDER", filled = true).apply {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52))
@@ -1609,7 +1609,7 @@ class MainActivity : Activity() {
                 if (url.isEmpty()) { return@setOnClickListener }
                 showBusy("Testing...")
                 Thread {
-                    val api = remote.RemoteApi(url, key)
+                    val api = RemoteApi(url, key)
                     val (ok, latency) = api.testConnection()
                     runOnUiThread {
                         if (ok) showErrorScreen("Reachable\nLatency: ${latency}ms")
@@ -1736,14 +1736,14 @@ class MainActivity : Activity() {
         
         showBusy("Submitting jobs...")
         Thread {
-            val api = remote.RemoteApi(url, key)
+            val api = RemoteApi(url, key)
             val resStr = "${resW}x${resH}"
             var successCount = 0
             
             blocks.forEach { block ->
                 val jobId = api.submitJob(block.file, fps, resStr, 10, batchEnhance) // duration mocked to 10s for now
                 if (jobId != null) {
-                    val meta = remote.JobStore.JobMeta(
+                    val meta = JobStore.JobMeta(
                         jobId = jobId,
                         fileName = block.name,
                         createdAt = System.currentTimeMillis(),
@@ -1835,7 +1835,7 @@ class MainActivity : Activity() {
         Thread {
             val url = securePrefs.baseUrl
             val key = securePrefs.apiKey
-            val api = remote.RemoteApi(url, key)
+            val api = RemoteApi(url, key)
             
             val tempFile = File(cacheDir, "broll_${job.jobId}.mp4")
             val ok = api.downloadFile(job.jobId, tempFile) { pct, speedKbps ->
@@ -1915,7 +1915,7 @@ class MainActivity : Activity() {
         val job = synchronized(remoteJobs) { remoteJobs.getOrNull(idx) } ?: return
         showBusy("Cancelling...")
         Thread {
-            val api = remote.RemoteApi(securePrefs.baseUrl, securePrefs.apiKey)
+            val api = RemoteApi(securePrefs.baseUrl, securePrefs.apiKey)
             api.cancelJob(job.jobId)
             synchronized(remoteJobs) { 
                 remoteJobs[idx].state = "CANCELLED"
@@ -1944,7 +1944,7 @@ class MainActivity : Activity() {
                     val url = securePrefs.baseUrl
                     val key = securePrefs.apiKey
                     if (url.isNotEmpty() && key.isNotEmpty()) {
-                        val api = remote.RemoteApi(url, key)
+                        val api = RemoteApi(url, key)
                         var changed = false
                         val jobsCopy = synchronized(remoteJobs) { remoteJobs.toList() }
                         

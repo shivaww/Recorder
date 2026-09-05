@@ -79,7 +79,7 @@ class RemoteApi(private val baseUrl: String, private val apiKey: String) {
             
             val resp = conn.inputStream.bufferedReader().readText()
             // Expects: {"job_id": "abc123"}
-            val regex = Regex("\"job_id\"\s*:\s*\"([^\"]+)\"")
+            val regex = Regex("\"job_id\"\\s*:\\s*\"([^\"]+)\"")
             return regex.find(resp)?.groupValues?.get(1)
         } catch (e: Exception) {
             return null
@@ -93,10 +93,10 @@ class RemoteApi(private val baseUrl: String, private val apiKey: String) {
         return try {
             if (conn.responseCode !in 200..299) return null
             val resp = conn.inputStream.bufferedReader().readText()
-            val state = Regex("\"state\"\s*:\s*\"([^\"]+)\"").find(resp)?.groupValues?.get(1) ?: return null
-            val frame = Regex("\"frame\"\s*:\s*(\d+)").find(resp)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-            val total = Regex("\"total_frames\"\s*:\s*(\d+)").find(resp)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-            val error = Regex("\"error\"\s*:\s*\"([^\"]+)\"").find(resp)?.groupValues?.get(1)
+            val state = Regex("\"state\"\\s*:\\s*\"([^\"]+)\"").find(resp)?.groupValues?.get(1) ?: return null
+            val frame = Regex("\"frame\"\\s*:\\s*(\\d+)").find(resp)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val total = Regex("\"total_frames\"\\s*:\\s*(\\d+)").find(resp)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val error = Regex("\"error\"\\s*:\\s*\"([^\"]+)\"").find(resp)?.groupValues?.get(1)
             JobStatus(state, frame, total, error)
         } catch (e: Exception) {
             null
