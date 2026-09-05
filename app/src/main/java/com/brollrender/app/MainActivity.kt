@@ -94,6 +94,10 @@ class MainActivity : Activity() {
     private var batchCancel = false
     private var postNotifAsked = false
 
+    // SAF picker target: false = normal flow (CHOOSE HTML -> PREVIEW),
+    // true = overnight queue (+ ADD BLOCK stages a block).
+    private var queuePick = false
+
     // DONE state
     private var doneUri: Uri? = null
     private var doneName = ""
@@ -185,7 +189,7 @@ class MainActivity : Activity() {
             styleButton(this, filled)
         }
 
-    // ===================== PICK SCREEN (queue builder) =====================
+    // ========== PICK SCREEN (single render) + OVERNIGHT QUEUE ==========
 
     /** One staged overnight-batch block: file in internal storage + label. */
     private data class Block(val file: File, val name: String)
@@ -209,70 +213,41 @@ class MainActivity : Activity() {
             setPadding(pad, pad, pad, pad)
         }
         col.addView(monoTv("BROLLRENDER", 26, AMBER, true))
-        col.addView(monoTv("HTML -> exact 16:9 MP4 / overnight batch", 12, TXT2))
-        col.addView(spacer(dp(24)))
-
-        // ---- queue: add block 1, then + the next, until N ----
-        col.addView(
-            monoTv(
-                "QUEUE · ${blocks.size} BLOCK" + if (blocks.size == 1) "" else "S",
-                11, TXT2
-            )
-        )
-        blocks.forEachIndexed { i, b ->
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-            row.addView(
-                monoTv("B${i + 1}  ${b.name}", 12, TXT).apply {
-                    layoutParams = LinearLayout.LayoutParams(
-                        0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
-                    )
-                }
-            )
-            row.addView(
-                mkButton("X").apply {
-                    setOnClickListener {
-                        if (!batchRunning) {
-                            blocks.removeAt(i)
-                            showPickScreen()
-                        }
-                    }
-                    layoutParams = LinearLayout.LayoutParams(dp(44), dp(36))
-                }
-            )
-            col.addView(row)
-            col.addView(spacer(dp(4)))
-        }
-        col.addView(spacer(dp(8)))
-        col.addView(mkButton("+ ADD BLOCK (FILE)", filled = true).apply {
+        col.addView(monoTv("HTML -> exact 16:9 MP4 / offscreen render", 12, TXT2))
+        col.addView(spacer(dp(28)))
+        col.addView(mkButton("CHOOSE HTML", filled = true).apply {
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(48)
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(52)
             )
-            setOnClickListener { launchPicker() }
+            setOnClickListener {
+                queuePick = false
+                launchPicker()
+            }
         })
         col.addView(spacer(dp(8)))
-        col.addView(mkButton("+ PASTE BLOCK").apply {
+        col.addView(mkButton("PASTE HTML").apply {
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(44)
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(48)
             )
             setOnClickListener { pasteHtml() }
         })
-        if (blocks.isNotEmpty()) {
-            col.addView(spacer(dp(4)))
-            col.addView(mkButton("CLEAR QUEUE").apply {
-                setOnClickListener {
-                    if (!batchRunning) {
-                        blocks.clear()
-                        blockDir().deleteRecursively()
-                        blockSeq = 0
-                        showPickScreen()
-                    }
-                }
-            })
+        if (htmlFile != null) {
+            col.addView(spacer(dp(12)))
+            col.addView(monoTv("last: $htmlName", 12, TXT2))
         }
-        col.addView(spacer(dp(24)))
+        col.addView(spacer(dp(16)))
+        // Overnight batch is a SEPARATE feature: its own queue screen, never
+        // in the way of the normal PICK -> PREVIEW -> RENDER -> DONE flow.
+        col.addView(mkButton("OVERNIGHT QUEUE").apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(48)
+            )
+            setOnClickListener { showQueueScreen() }
+        })
+        col.addView(spacer(dp(34)))
 
         val resRow = toggleRow(
             col, "RESOLUTION",
@@ -310,6 +285,126 @@ class MainActivity : Activity() {
             ),
             if (resW == 1920 && fps == 30) 0 else 1
         )
+        prepared?.let { p ->
+            col.addView(spacer(dp(14)))
+            col.addView(monoTv("DURATION  auto ${p.durationMs / 1000} s - editable on preview", 12, TXT2))
+        }
+        showScreen(android.widget.ScrollView(this).apply { addView(col) })
+    }
+
+    // ===================== OVERNIGHT QUEUE SCREEN =====================
+
+    /** Queue builder for the overnight batch - reached from home. */
+    private fun showQueueScreen() {
+        val pad = dp(20)
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad)
+        }
+        col.addView(monoTv("OVERNIGHT QUEUE", 22, AMBER, true))
+        col.addView(monoTv("blocks render one at a time · screen off", 12, TXT2))
+        col.addView(spacer(dp(16)))
+
+        // ---- queue: add block 1, then + the next, until N ----
+        col.addView(
+            monoTv(
+                "QUEUE · ${blocks.size} BLOCK" + if (blocks.size == 1) "" else "S",
+                11, TXT2
+            )
+        )
+        blocks.forEachIndexed { i, b ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            row.addView(
+                monoTv("B${i + 1}  ${b.name}", 12, TXT).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+                    )
+                }
+            )
+            row.addView(
+                mkButton("X").apply {
+                    setOnClickListener {
+                        if (!batchRunning) {
+                            blocks.removeAt(i)
+                            showQueueScreen()
+                        }
+                    }
+                    layoutParams = LinearLayout.LayoutParams(dp(44), dp(36))
+                }
+            )
+            col.addView(row)
+            col.addView(spacer(dp(4)))
+        }
+        col.addView(spacer(dp(8)))
+        col.addView(mkButton("+ ADD BLOCK (FILE)", filled = true).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(48)
+            )
+            setOnClickListener {
+                queuePick = true
+                launchPicker()
+            }
+        })
+        col.addView(spacer(dp(8)))
+        col.addView(mkButton("+ PASTE BLOCK").apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(44)
+            )
+            setOnClickListener { pasteBlock() }
+        })
+        if (blocks.isNotEmpty()) {
+            col.addView(spacer(dp(4)))
+            col.addView(mkButton("CLEAR QUEUE").apply {
+                setOnClickListener {
+                    if (!batchRunning) {
+                        blocks.clear()
+                        blockDir().deleteRecursively()
+                        blockSeq = 0
+                        showQueueScreen()
+                    }
+                }
+            })
+        }
+        col.addView(spacer(dp(24)))
+
+        val qResRow = toggleRow(
+            col, "RESOLUTION",
+            listOf(
+                "4K" to { resW = 3840; resH = 2160; bitRate = 40_000_000 },
+                "1080p" to { resW = 1920; resH = 1080; bitRate = 16_000_000 },
+                "720p" to { resW = 1280; resH = 720; bitRate = 8_000_000 },
+                "480p" to { resW = 854; resH = 480; bitRate = 8_000_000 }
+            ),
+            if (resW == 3840) 0 else if (resW == 1920) 1 else if (resW == 1280) 2 else 3
+        )
+        val qFpsRow = toggleRow(
+            col, "FPS",
+            listOf(
+                "30" to { fps = 30 },
+                "24" to { fps = 24 },
+                "60" to { fps = 60 }
+            ),
+            if (fps == 30) 0 else if (fps == 24) 1 else 2
+        )
+        toggleRow(
+            col, "MODE",
+            listOf(
+                "FINAL" to {
+                    qResRow.select(0); resW = 1920; resH = 1080
+                    qFpsRow.select(0); fps = 30
+                    bitRate = 16_000_000
+                },
+                "DRAFT" to {
+                    qResRow.select(1); resW = 1280; resH = 720
+                    qFpsRow.select(1); fps = 24
+                    bitRate = 8_000_000
+                }
+            ),
+            if (resW == 1920 && fps == 30) 0 else 1
+        )
         // ENHANCE applies to every block in the batch (one global setting).
         toggleRow(
             col, "ENHANCE",
@@ -332,6 +427,8 @@ class MainActivity : Activity() {
                 setOnClickListener { startOvernight() }
             }
         )
+        col.addView(spacer(dp(8)))
+        col.addView(mkButton("BACK").apply { setOnClickListener { showPickScreen() } })
 
         showScreen(android.widget.ScrollView(this).apply { addView(col) })
     }
@@ -396,8 +493,44 @@ class MainActivity : Activity() {
         startActivityForResult(i, REQ_PICK)
     }
 
-    /** Paste full HTML from clipboard into the queue as the next block. */
+    /** Paste full HTML from clipboard (any length, Termux-style) - the
+     *  normal single-render flow: prepare + PREVIEW screen. */
     private fun pasteHtml() {
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val text = cm.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
+        if (text.isBlank()) {
+            showErrorScreen("clipboard is empty - copy the full HTML first")
+            return
+        }
+        val trimmed = text.trim()
+        if (!trimmed.startsWith("<") && !trimmed.contains("<html", ignoreCase = true)
+            && !trimmed.contains("<!doctype", ignoreCase = true)) {
+            showErrorScreen("clipboard doesn't look like HTML - copy the full file content")
+            return
+        }
+        showBusy("WRITING PASTED HTML")
+        Thread {
+            try {
+                val f = File(cacheDir, "pasted.html")
+                f.writeText(text)
+                htmlFile = f
+                htmlName = "pasted (${text.length / 1024}KB)"
+                runOnUiThread { showBusy("ANALYZING PAGE") }
+                val result = engine.prepare(f, resW, resH)
+                runOnUiThread {
+                    when (result) {
+                        is RenderEngine.PrepareResult.Ok -> showPreviewScreen(result)
+                        is RenderEngine.PrepareResult.Fail -> showErrorScreen(result.message)
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread { showErrorScreen("paste failed: ${e.message}") }
+            }
+        }.start()
+    }
+
+    /** Paste the next OVERNIGHT QUEUE block into internal storage. */
+    private fun pasteBlock() {
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val text = cm.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
         if (text.isBlank()) {
@@ -417,7 +550,7 @@ class MainActivity : Activity() {
                 dest.writeText(text)
                 runOnUiThread {
                     blocks.add(Block(dest, "pasted (${text.length / 1024}KB)"))
-                    showPickScreen()
+                    showQueueScreen()
                 }
             } catch (e: Exception) {
                 runOnUiThread { showErrorScreen("paste failed: ${e.message}") }
@@ -430,21 +563,46 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != REQ_PICK || resultCode != RESULT_OK) return
         val uri = data?.data ?: return
-        showBusy("STAGING BLOCK ${blocks.size + 1}")
+        if (queuePick) {
+            // Overnight queue: stage the picked file as the next block.
+            showBusy("STAGING BLOCK ${blocks.size + 1}")
+            Thread {
+                try {
+                    val dest = nextBlockFile()
+                    contentResolver.openInputStream(uri)?.use { ins ->
+                        FileOutputStream(dest).use { outs -> ins.copyTo(outs) }
+                    } ?: throw RuntimeException("cannot open selected file")
+                    runOnUiThread {
+                        blocks.add(Block(dest, queryName(uri)))
+                        showQueueScreen()
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread { showErrorScreen("add block failed: ${e.message}") }
+                }
+            }.start()
+            return
+        }
+        // Normal single-render flow: PICK -> PREVIEW.
+        showBusy("COPYING HTML")
         Thread {
             try {
-                // SAF stream fully copied to internal storage BEFORE any
-                // load (pitfall 7.12). The queue holds files, not RAM.
-                val dest = nextBlockFile()
+                // SAF stream fully copied to cache BEFORE loadUrl (pitfall 7.12).
+                val f = File(cacheDir, "broll.html")
                 contentResolver.openInputStream(uri)?.use { ins ->
-                    FileOutputStream(dest).use { outs -> ins.copyTo(outs) }
+                    FileOutputStream(f).use { outs -> ins.copyTo(outs) }
                 } ?: throw RuntimeException("cannot open selected file")
+                htmlFile = f
+                htmlName = queryName(uri)
+                runOnUiThread { showBusy("ANALYZING PAGE") }
+                val result = engine.prepare(f, resW, resH)
                 runOnUiThread {
-                    blocks.add(Block(dest, queryName(uri)))
-                    showPickScreen()
+                    when (result) {
+                        is RenderEngine.PrepareResult.Ok -> showPreviewScreen(result)
+                        is RenderEngine.PrepareResult.Fail -> showErrorScreen(result.message)
+                    }
                 }
             } catch (e: Exception) {
-                runOnUiThread { showErrorScreen("add block failed: ${e.message}") }
+                runOnUiThread { showErrorScreen("pick failed: ${e.message}") }
             }
         }.start()
     }
@@ -1031,7 +1189,7 @@ class MainActivity : Activity() {
                 if (wasCancelled) {
                     cancelRequested = false
                     batchCancel = false
-                    showPickScreen()
+                    showQueueScreen()
                 } else {
                     batchSummary(done, failed)
                 }

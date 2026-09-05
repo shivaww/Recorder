@@ -50,6 +50,13 @@ class RenderEngine(private val activity: Activity) {
     companion object {
         const val VOID_COLOR = 0xFF0A0C10.toInt()
         private const val TAG = "RenderEngine"
+        // GPU-vs-software probe tolerance: 3% of sampled pixels. The old 1%
+        // was too tight for blur-heavy pages (text-shadow / glows / soft
+        // gradients rasterize slightly differently on the hw and sw paths)
+        // and downgraded blur-heavy pages to CPU readback for no real defect.
+        // A blank or stale GPU frame still mismatches by far more (different
+        // timeline shots differ in the tens of percent).
+        private const val MISMATCH_TOL = 0.03
         private const val THUMB_W = 480
         private const val THUMB_H = 270
     }
@@ -624,7 +631,8 @@ class RenderEngine(private val activity: Activity) {
             // FAST PATH: draw the page straight into the encoder's input
             // surface (GL-to-GL, no CPU round trip). gpuProbe() validates
             // it once per render; any failure falls back to software below.
-            val gpuDirect = gpuProbe(web, frameRect, fps, totalFrames)
+            val probeNote = gpuProbe(web, frameRect, fps, totalFrames)
+            val gpuDirect = probeNote == null
 
             // Full-canvas fast case: when the detected frame covers the whole
             // output canvas (AUTO-locked pages - the common case), the
@@ -635,7 +643,10 @@ class RenderEngine(private val activity: Activity) {
             fun report(f: Int) {
                 if (f % 30 == 0 || f == totalFrames - 1) {
                     val elapsed = (System.currentTimeMillis() - t0) / 1000.0
-                    if (elapsed > 0.5) {
+                    // f >= 2: skip the meaningless first-frame snapshot -
+                    // its rate is dominated by audio-encode + GPU-probe
+                    // warm-up and produced absurd ETAs (1000+ min at frame 1).
+                    if (elapsed > 0.5 && f >= 2) {
                         val doneCount = f + 1
                         val rate = doneCount / elapsed
                         val eta = if (rate > 0) ((totalFrames - doneCount) / rate).toLong() else -1L
@@ -651,10 +662,10 @@ class RenderEngine(private val activity: Activity) {
                 val now = System.currentTimeMillis()
                 if (now - lastStats >= 1000) {
                     lastStats = now
-                    onStats?.invoke(sampleSys(gpuPath))
+                    onStats?.invoke(sampleSys(gpuPath, probeNote))
                 }
             }
-            onStats?.invoke(sampleSys(gpuDirect))
+            onStats?.invoke(sampleSys(gpuDirect, probeNote))
             lastStats = System.currentTimeMillis()
 
             if (gpuDirect) {
@@ -866,7 +877,7 @@ class RenderEngine(private val activity: Activity) {
      * encoder's surface is never touched: a probe frame must never reach
      * the video stream. Runs on the render worker thread.
      */
-    private fun gpuProbe(web: WebView, frameRect: Rect, fps: Int, totalFrames: Int): Boolean {
+    private fun gpuProbe(web: WebView, frameRect: Rect, fps: Int, totalFrames: Int): String? {
         val w = outW
         val h = outH
         // Detached SurfaceTexture (single-buffer-mode constructor, API 26):
@@ -889,19 +900,20 @@ class RenderEngine(private val activity: Activity) {
                 val gpu = copySurface(probeSurface, w, h)
                 if (gpu == null) {
                     Log.w(TAG, "gpu probe: PixelCopy readback failed")
-                    return false
+                    return "pixelcopy readback failed"
                 }
                 val ref = probeReference(web, frameRect, tMs, w, h)
-                if (!framesAgree(gpu, ref, w, h)) {
-                    Log.w(TAG, "gpu probe: GPU frame disagrees with software reference")
-                    return false
+                val mm = framesAgreeRatio(gpu, ref, w, h)
+                if (mm > MISMATCH_TOL) {
+                    Log.w(TAG, "gpu probe: mismatch ratio $mm")
+                    return "mismatch " + (mm * 100).toInt() + "%"
                 }
             }
             Log.i(TAG, "gpu probe passed - drawing directly into the encoder surface")
-            return true
+            return null
         } catch (e: Exception) {
             Log.w(TAG, "gpu probe failed (${e.javaClass.simpleName}: ${e.message}) - software path")
-            return false
+            return "probe threw: " + e.javaClass.simpleName
         } finally {
             try {
                 probeSurface.release()
@@ -988,14 +1000,13 @@ class RenderEngine(private val activity: Activity) {
     }
 
     /**
-     * Compare a GPU-captured frame with its software reference. Sparse
-     * sampling (every 4th pixel in both axes - ~135k samples at 1080p)
-     * keeps the scan fast while still catching a blank frame, a wrong
-     * frame, or a stale/cached functor (frame 2 repeating frame 1).
-     * Antialiased edges may differ by rounding between the hw/sw paths,
-     * so up to 1% sampled-pixel mismatch is tolerated.
+     * Sparse-sample mismatch RATIO between a GPU-captured frame and its
+     * software reference (every 4th pixel in both axes - ~135k samples at
+     * 1080p): fast, still catches a blank frame or a stale/cached functor
+     * (frame 2 repeating frame 1). The caller owns the tolerance
+     * (MISMATCH_TOL) and the failure reason surfaced to the RENDER screen.
      */
-    private fun framesAgree(a: Bitmap, b: Bitmap, w: Int, h: Int): Boolean {
+    private fun framesAgreeRatio(a: Bitmap, b: Bitmap, w: Int, h: Int): Double {
         val px = 4
         var diff = 0
         val total = ((w + px - 1) / px) * ((h + px - 1) / px)
@@ -1004,12 +1015,7 @@ class RenderEngine(private val activity: Activity) {
                 if (a.getPixel(x, y) != b.getPixel(x, y)) diff++
             }
         }
-        val mismatch = diff.toDouble() / total
-        if (mismatch > 0.01) {
-            Log.w(TAG, "gpu probe: mismatch ratio " + mismatch)
-            return false
-        }
-        return true
+        return diff.toDouble() / total
     }
 
     /** Cross-thread state for the self-driven (GPU path) frame chain. */
@@ -1033,7 +1039,7 @@ class RenderEngine(private val activity: Activity) {
      * expose it - Android has NO public GPU-utilization API, so nothing is
      * ever fabricated), and the live pipeline (GPU-direct vs CPU readback).
      */
-    private fun sampleSys(gpuDirect: Boolean): String {
+    private fun sampleSys(gpuDirect: Boolean, probeNote: String?): String {
         val pssMb = try {
             val mi = Debug.MemoryInfo()
             Debug.getMemoryInfo(mi)
@@ -1044,6 +1050,9 @@ class RenderEngine(private val activity: Activity) {
         val sb = StringBuilder("MEM ").append(pssMb).append(" MB")
         gpuBusyPct()?.let { g -> sb.append(" · GPU ").append(g).append("%") }
         sb.append(" · ").append(if (gpuDirect) "GPU DIRECT" else "CPU READBACK")
+        // When the fast path was rejected, say WHY - the number is the
+        // diagnostic for the next fix, never a guess.
+        if (!gpuDirect && probeNote != null) sb.append(" (").append(probeNote).append(")")
         return sb.toString()
     }
 
