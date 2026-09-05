@@ -35,6 +35,7 @@ import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.Locale
+import com.brollrender.app.remote.*
 import kotlin.math.roundToInt
 
 /**
@@ -1500,7 +1501,6 @@ class MainActivity : Activity() {
 
         showScreen(android.widget.ScrollView(this).apply { addView(col) })
     }
-}
 
     // ===================== KAGGLE SETUP SCREEN =====================
 
@@ -1978,3 +1978,4 @@ class MainActivity : Activity() {
         try { remotePollThread?.join(1500) } catch (_: Exception) {}
         remotePollThread = null
     }
+}
