@@ -280,7 +280,7 @@ class MainActivity : Activity() {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 dp(48)
             )
-            setOnClickListener { showRemoteQueueScreen() }
+            setOnClickListener { showKaggleSetupScreen() }
         })
         col.addView(spacer(dp(34)))
 
@@ -1501,6 +1501,63 @@ class MainActivity : Activity() {
         showScreen(android.widget.ScrollView(this).apply { addView(col) })
     }
 }
+
+    // ===================== KAGGLE SETUP SCREEN =====================
+
+    private fun showKaggleSetupScreen() {
+        val pad = dp(20)
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad)
+        }
+        col.addView(monoTv("KAGGLE SETUP", 22, AMBER, true))
+        col.addView(monoTv("1. Go to kaggle.com, create new notebook.\n2. Select 2x T4 in Accelerator.\n3. Run these 3 scripts in 3 separate cells.", 12, TXT2))
+        col.addView(spacer(dp(16)))
+        
+        fun addScriptBlock(title: String, code: String) {
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundColor(STROKE)
+                setPadding(dp(14), dp(14), dp(14), dp(14))
+            }
+            card.addView(monoTv(title, 14, TXT, true))
+            card.addView(spacer(dp(8)))
+            val codeView = TextView(this).apply {
+                text = code
+                textSize = 10f
+                typeface = Typeface.MONOSPACE
+                setTextColor(TXT2)
+                setHorizontallyScrolling(true)
+                maxLines = 10
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            }
+            card.addView(codeView)
+            card.addView(spacer(dp(8)))
+            card.addView(mkButton("COPY").apply {
+                setOnClickListener {
+                    val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("script", code))
+                    text = "COPIED!"
+                    postDelayed({ text = "COPY" }, 2000)
+                }
+            })
+            col.addView(card)
+            col.addView(spacer(dp(16)))
+        }
+
+        addScriptBlock("STEP 1: Install Essentials", remote.KaggleScripts.step1)
+        addScriptBlock("STEP 2: Download Cloudflared", remote.KaggleScripts.step2)
+        addScriptBlock("STEP 3: Launch Server", remote.KaggleScripts.step3)
+        
+        col.addView(mkButton("CONTINUE TO KAGGLE RENDER", filled = true).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52))
+            setOnClickListener { showRemoteQueueScreen() }
+        })
+        col.addView(spacer(dp(8)))
+        col.addView(mkButton("BACK").apply { setOnClickListener { showPickScreen() } })
+        
+        showScreen(android.widget.ScrollView(this).apply { addView(col) })
+    }
 
     // ===================== REMOTE QUEUE SCREEN =====================
 
