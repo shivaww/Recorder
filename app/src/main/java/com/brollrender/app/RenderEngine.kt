@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.SurfaceTexture
+import android.media.ImageReader
 import android.os.Debug
 import android.os.Handler
 import android.os.Looper
@@ -574,6 +575,14 @@ class RenderEngine(private val activity: Activity) {
         if (w <= 0 || h <= 0) return RenderOutcome.Failed("output size unknown")
 
         var encoder: VideoEncoder? = null
+        // Warm-draw surface (stale-functor fix, probe-validated): when the
+        // hw capture shows the PREVIOUSLY committed frame, each frame draws
+        // here first (forcing the compositor commit for the current seek)
+        // and then into the encoder surface. ImageReader-backed with
+        // acquireLatestImage() drainage - never blocks the UI thread.
+        // Declared here so the catch path can release it too.
+        var warmSurface: Surface? = null
+        var warmReader: ImageReader? = null
         val t0 = System.currentTimeMillis()
         try {
             val frameBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888) // allocate ONCE
@@ -631,8 +640,29 @@ class RenderEngine(private val activity: Activity) {
             // FAST PATH: draw the page straight into the encoder's input
             // surface (GL-to-GL, no CPU round trip). gpuProbe() validates
             // it once per render; any failure falls back to software below.
-            val probeNote = gpuProbe(web, frameRect, fps, totalFrames)
-            val gpuDirect = probeNote == null
+            val probe = gpuProbe(web, frameRect, fps, totalFrames)
+            if (probe.warmDraw) {
+                // The loop's warm primitive: an ImageReader-backed hardware
+                // surface (same lockHardwareCanvas mechanism as the capture
+                // path, so the functor draws identically) with a consumer -
+                // the reader is drained after every warm draw, so its buffer
+                // queue can never fill and block the UI thread.
+                try {
+                    val rd = ImageReader.newInstance(
+                        w, h, android.graphics.PixelFormat.RGBA_8888, 2
+                    )
+                    warmSurface = rd.surface
+                    warmReader = rd
+                } catch (_: Exception) {
+                    warmSurface = null
+                }
+            }
+            val gpuDirect = probe.direct && (!probe.warmDraw || warmSurface != null)
+            val probeNote = when {
+                !probe.direct -> probe.reason
+                warmSurface == null -> "warm surface unavailable"
+                else -> null
+            }
 
             // Full-canvas fast case: when the detected frame covers the whole
             // output canvas (AUTO-locked pages - the common case), the
@@ -687,6 +717,20 @@ class RenderEngine(private val activity: Activity) {
                         // applied on this same UI-thread pass (pitfall 7.3).
                         if (st.stop) return@evaluateJavascript
                         try {
+                            warmSurface?.let { ws ->
+                                // Stale-functor fix (probe-validated): a warm
+                                // draw forces the compositor commit for t=f
+                                // BEFORE the capture draw into the encoder
+                                // surface - without it the functor renders
+                                // the previously committed frame.
+                                val wc = ws.lockHardwareCanvas()
+                                wc.drawColor(VOID_COLOR)
+                                web.draw(wc)
+                                ws.unlockCanvasAndPost(wc)
+                                // Free the buffer the compositor just filled:
+                                // the reader only ever holds the latest image.
+                                try { warmReader?.acquireLatestImage()?.close() } catch (_: Exception) {}
+                            }
                             val sc = surface.lockHardwareCanvas()
                             sc.drawColor(VOID_COLOR)
                             if (!full) {
@@ -856,12 +900,14 @@ class RenderEngine(private val activity: Activity) {
             encoder.signalEos()
             encoder.drain(true)
             encoder.release()
+            try { warmReader?.close() } catch (_: Exception) {}
             return RenderOutcome.Completed(
                 firstFrame ?: frameBmp.copy(Bitmap.Config.ARGB_8888, false)
             )
         } catch (e: Exception) {
             encoder?.release()
             outputFile.delete()
+            try { warmReader?.close() } catch (_: Exception) {}
             return RenderOutcome.Failed("render failed: ${e.message}")
         }
     }
@@ -877,7 +923,14 @@ class RenderEngine(private val activity: Activity) {
      * encoder's surface is never touched: a probe frame must never reach
      * the video stream. Runs on the render worker thread.
      */
-    private fun gpuProbe(web: WebView, frameRect: Rect, fps: Int, totalFrames: Int): String? {
+    /** GPU-direct validation outcome. */
+    private class ProbeInfo(
+        val direct: Boolean,    // run the GPU-direct frame chain
+        val warmDraw: Boolean,  // per-frame warm draw required (stale functor)
+        val reason: String?     // failure cause, shown on the RENDER screen
+    )
+
+    private fun gpuProbe(web: WebView, frameRect: Rect, fps: Int, totalFrames: Int): ProbeInfo {
         val w = outW
         val h = outH
         // Detached SurfaceTexture (single-buffer-mode constructor, API 26):
@@ -888,6 +941,21 @@ class RenderEngine(private val activity: Activity) {
         // buffers and the probe would fail on every device.
         tex.setDefaultBufferSize(w, h)
         val probeSurface = Surface(tex)
+        // Warm-draw surface - the EXACT primitive the loop uses in warmDraw
+        // mode: ImageReader-backed hardware surface + per-draw drainage.
+        // (NOT a hardware Bitmap: Canvas(Bitmap) throws on immutable
+        // hardware bitmaps. NOT a bare SurfaceTexture: without a consumer
+        // its queue blocks the UI thread after a few frames. The reader is
+        // the consumer.)
+        var warmReader: ImageReader? = null
+        try {
+            warmReader = ImageReader.newInstance(
+                w, h, android.graphics.PixelFormat.RGBA_8888, 2
+            )
+        } catch (_: Exception) {
+            warmReader = null
+        }
+        val warmSurface = warmReader?.surface
         try {
             // Two DIFFERENT mid-timeline times: differing frames prove the
             // functor drew live content per seek, not a stale cached layer.
@@ -895,25 +963,58 @@ class RenderEngine(private val activity: Activity) {
             val f2 = (2 * totalFrames / 3).coerceAtLeast(f1 + 1)
             val t1 = f1 * 1000.0 / fps
             val t2 = f2 * 1000.0 / fps
+            // Software ground truth at t=0: the state the page-load commit
+            // holds. If the FIRST hw capture matches THIS instead of its own
+            // reference, the functor is drawing the load commit - stale.
+            val r0 = probeReference(web, frameRect, 0.0, w, h)
+            var carry: Bitmap? = r0
             for (tMs in listOf(t1, t2)) {
                 probeDraw(web, probeSurface, frameRect, tMs)
-                val gpu = copySurface(probeSurface, w, h)
-                if (gpu == null) {
+                val g = copySurface(probeSurface, w, h)
+                if (g == null) {
                     Log.w(TAG, "gpu probe: PixelCopy readback failed")
-                    return "pixelcopy readback failed"
+                    return ProbeInfo(false, false, "pixelcopy readback failed")
                 }
-                val ref = probeReference(web, frameRect, tMs, w, h)
-                val mm = framesAgreeRatio(gpu, ref, w, h)
+                val r = probeReference(web, frameRect, tMs, w, h)
+                val mm = framesAgreeRatio(g, r, w, h)
                 if (mm > MISMATCH_TOL) {
-                    Log.w(TAG, "gpu probe: mismatch ratio $mm")
-                    return "mismatch " + (mm * 100).toInt() + "%"
+                    val at = if (tMs == t1) "t1" else "t2"
+                    // STALE TEST: does the hw capture match an EARLIER time?
+                    val stale = carry?.let { framesAgreeRatio(g, it, w, h) } ?: 1.0
+                    // Warm-draw experiment: the loop's exact warm sequence -
+                    // seek, warm draw into the ImageReader surface (forces
+                    // the compositor commit), then the capture draw.
+                    if (warmSurface != null) {
+                        try {
+                            probeWarmAndCapture(
+                                web, warmSurface, warmReader, probeSurface, frameRect, tMs
+                            )
+                            val g2 = copySurface(probeSurface, w, h)
+                            if (g2 != null && framesAgreeRatio(g2, r, w, h) <= MISMATCH_TOL) {
+                                Log.i(
+                                    TAG,
+                                    "gpu probe: warm-draw fixes stale functor " +
+                                        "(plain mismatch was " + (mm * 100).toInt() + "%)"
+                                )
+                                return ProbeInfo(true, true, null)
+                            }
+                        } catch (_: Exception) {
+                        }
+                    }
+                    val sb = StringBuilder("mismatch ").append((mm * 100).toInt())
+                        .append("% at ").append(at)
+                    if (stale <= 0.05) sb.append(" (stale hw)")
+                    sb.append(if (warmSurface == null) ", warm n/a" else ", warm no-fix")
+                    Log.w(TAG, "gpu probe: $sb")
+                    return ProbeInfo(false, false, sb.toString())
                 }
+                carry = r
             }
             Log.i(TAG, "gpu probe passed - drawing directly into the encoder surface")
-            return null
+            return ProbeInfo(true, false, null)
         } catch (e: Exception) {
             Log.w(TAG, "gpu probe failed (${e.javaClass.simpleName}: ${e.message}) - software path")
-            return "probe threw: " + e.javaClass.simpleName
+            return ProbeInfo(false, false, "probe threw: " + e.javaClass.simpleName)
         } finally {
             try {
                 probeSurface.release()
@@ -923,7 +1024,57 @@ class RenderEngine(private val activity: Activity) {
                 tex.release()
             } catch (_: Exception) {
             }
+            try {
+                warmReader?.close()
+            } catch (_: Exception) {
+            }
         }
+    }
+
+    /**
+     * Seek to tMs, warm-draw into the ImageReader surface (forces the
+     * compositor commit for the fresh seek), then capture-draw into the
+     * probe surface - the EXACT sequence the render loop runs in warmDraw
+     * mode, including the post-warm image drainage. UI thread, inside the
+     * seek callback (same discipline as the loop).
+     */
+    private fun probeWarmAndCapture(
+        web: WebView,
+        warmSurface: Surface,
+        warmReader: ImageReader?,
+        surface: Surface,
+        frameRect: Rect,
+        tMs: Double
+    ) {
+        val latch = CountDownLatch(1)
+        var err: Exception? = null
+        activity.runOnUiThread {
+            web.evaluateJavascript(JsContracts.seekJs(tMs)) { _ ->
+                try {
+                    val wc = warmSurface.lockHardwareCanvas()
+                    wc.drawColor(VOID_COLOR)
+                    web.draw(wc)
+                    warmSurface.unlockCanvasAndPost(wc)
+                    try { warmReader?.acquireLatestImage()?.close() } catch (_: Exception) {}
+                    val sc = surface.lockHardwareCanvas()
+                    sc.drawColor(VOID_COLOR)
+                    sc.save()
+                    sc.clipRect(frameRect)
+                    sc.translate(-frameRect.left.toFloat(), -frameRect.top.toFloat())
+                    web.draw(sc)
+                    sc.restore()
+                    surface.unlockCanvasAndPost(sc)
+                } catch (e: Exception) {
+                    err = e
+                } finally {
+                    latch.countDown()
+                }
+            }
+        }
+        if (!latch.await(10, TimeUnit.SECONDS)) {
+            throw RuntimeException("warm probe draw timed out at t=$tMs ms")
+        }
+        err?.let { throw it }
     }
 
     /** Seek to tMs and draw the page into the probe surface (UI thread). */
