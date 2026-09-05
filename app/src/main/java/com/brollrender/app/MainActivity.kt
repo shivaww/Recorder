@@ -827,6 +827,7 @@ class MainActivity : Activity() {
 
     private lateinit var renderBar: ProgressBar
     private lateinit var renderStatus: TextView
+    private lateinit var renderStats: TextView
     private var tempOutput: File? = null
 
     private fun showRenderScreen(title: String, durationSec: Int) {
@@ -851,6 +852,11 @@ class MainActivity : Activity() {
         col.addView(spacer(dp(8)))
         renderStatus = monoTv("frame 0/${durationSec * fps}", 12, TXT2)
         col.addView(renderStatus)
+        col.addView(spacer(dp(4)))
+        // Realtime pipeline readout (~1 Hz from the engine): RAM, GPU busy
+        // % (when the SoC exposes it), and which pipeline is live.
+        renderStats = monoTv("MEM -- MB · measuring...", 11, TXT2)
+        col.addView(renderStats)
         col.addView(spacer(dp(24)))
         col.addView(mkButton("CANCEL").apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -865,6 +871,10 @@ class MainActivity : Activity() {
             }
         })
         showScreen(col)
+    }
+
+    private fun updateRenderStats(s: String) {
+        if (::renderStats.isInitialized) renderStats.text = s
     }
 
     private fun updateRenderProgress(f: Int, total: Int, rateFps: Double, etaSec: Long) {
@@ -911,15 +921,19 @@ class MainActivity : Activity() {
             ambienceType = if (sfxOn) p.ambienceType else null,
             ambienceGain = p.ambienceGain,
             textScale = textScale,
+            onStats = { s -> runOnUiThread { updateRenderStats(s) } },
             onProgress = { f, t, rate, eta ->
                 runOnUiThread { updateRenderProgress(f, t, rate, eta) }
             },
-            isCancelled = {
-                // Section 7.15: backgrounded mid-render = graceful pause (wait
-                // at the frame boundary), not an abort.
-                while (renderPaused && !cancelRequested) Thread.sleep(200)
-                cancelRequested
-            }
+            isPaused = {
+                // Section 7.15: backgrounded mid-render = graceful pause at
+                // the frame boundary. Now a NON-BLOCKING flag the engine's
+                // UI-side frame chain checks before issuing the next frame;
+                // a blocking wait here would let the surface buffer queue
+                // fill and ANR the app while backgrounded.
+                renderPaused
+            },
+            isCancelled = { cancelRequested }
         )
     }
 
@@ -993,6 +1007,7 @@ class MainActivity : Activity() {
                     ambienceType = ok.ambienceType,
                     ambienceGain = ok.ambienceGain,
                     textScale = 1f,
+                    onStats = { s -> runOnUiThread { updateRenderStats(s) } },
                     onProgress = { f, t, rate, eta ->
                         runOnUiThread { updateRenderProgress(f, t, rate, eta) }
                     },

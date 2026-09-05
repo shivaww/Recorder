@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.SurfaceTexture
+import android.os.Debug
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -528,15 +529,20 @@ class RenderEngine(private val activity: Activity) {
     }
 
     /**
-     * Section 5.8 frame loop. Worker thread; the codec is drained ONLY from
-     * this thread (section 6). Per frame, seek + draw land in one UI-thread
-     * callback pass (pitfall 7.3). FAST PATH: the page is drawn straight
-     * into the encoder's input surface (hardware canvas, GL-to-GL, no CPU
-     * round trip) after a one-shot probe validates it; the software pipeline
-     * (GPU->CPU readback + 1:1 blit, filterBitmap=false, pitfall 7.10) is the
-     * automatic fallback. Drain after every frame; EOS drain; codec released
-     * before muxer (inside VideoEncoder). Cancel = clean abort, partial file
-     * deleted.
+     * Section 5.8 frame loop. Called from a WORKER thread (never the UI
+     * thread). FAST PATH (GPU-direct, probe-validated): the UI thread runs a
+     * self-driven chain - each seek callback draws its frame into the
+     * encoder's input surface and issues the next seek itself - while this
+     * thread only drains the codec and watches a stall watchdog; no
+     * per-frame worker<->UI handoff (previously: runOnUiThread + latch +
+     * await, two thread hops and a park/unpark around EVERY seek+draw), so
+     * the GPU raster + encode pipeline runs continuously with no dead time.
+     * SOFTWARE fallback (GPU->CPU readback): the legacy per-frame latch
+     * loop - the shared bitmap must not be overwritten before its blit.
+     * The codec is drained ONLY from the caller thread (section 6). Cancel
+     * = clean abort, partial file deleted. onStats: ~1 Hz RAM/GPU/pipeline
+     * readout for the RENDER screen.
+     */
      */
     fun render(
         frameRect: Rect,
@@ -552,6 +558,8 @@ class RenderEngine(private val activity: Activity) {
         ambienceGain: Float = 0.25f,
         textScale: Float = 1f,
         onProgress: (frameNo: Int, total: Int, rateFps: Double, etaSec: Long) -> Unit,
+        onStats: ((stats: String) -> Unit)? = null,
+        isPaused: () -> Boolean = { false },
         isCancelled: () -> Boolean
     ): RenderOutcome {
         val web = webView ?: return RenderOutcome.Failed("prepare() must run before render()")
@@ -619,90 +627,219 @@ class RenderEngine(private val activity: Activity) {
             // it once per render; any failure falls back to software below.
             val gpuDirect = gpuProbe(web, frameRect, fps, totalFrames)
 
-            for (f in 0 until totalFrames) {
-                if (isCancelled()) {
+            // Full-canvas fast case: when the detected frame covers the whole
+            // output canvas (AUTO-locked pages - the common case), the
+            // save/clip/translate/restore dance is a no-op; skip it.
+            val full = frameRect.left <= 0 && frameRect.top <= 0 &&
+                frameRect.right >= w && frameRect.bottom >= h
+
+            fun report(f: Int) {
+                if (f % 30 == 0 || f == totalFrames - 1) {
+                    val elapsed = (System.currentTimeMillis() - t0) / 1000.0
+                    if (elapsed > 0.5) {
+                        val doneCount = f + 1
+                        val rate = doneCount / elapsed
+                        val eta = if (rate > 0) ((totalFrames - doneCount) / rate).toLong() else -1L
+                        onProgress(doneCount, totalFrames, rate, eta)
+                    }
+                }
+            }
+
+            // ~1 Hz system readout (RAM + GPU + live pipeline) for the RENDER
+            // screen; a no-op for callers that pass no onStats.
+            var lastStats = 0L
+            fun sample(gpuPath: Boolean) {
+                val now = System.currentTimeMillis()
+                if (now - lastStats >= 1000) {
+                    lastStats = now
+                    onStats?.invoke(sampleSys(gpuPath))
+                }
+            }
+            onStats?.invoke(sampleSys(gpuDirect))
+            lastStats = System.currentTimeMillis()
+
+            if (gpuDirect) {
+                // ===== FAST PATH: self-driven frame chain =====
+                // The seek callback for frame N draws N and issues the seek
+                // for N+1 from inside the same callback, all on the UI
+                // thread - no worker<->UI ping-pong per frame. This thread
+                // never touches frames: it is the codec drain + watchdog
+                // thread (section 6 - only this thread drains), and
+                // MediaCodec input-surface backpressure naturally throttels
+                // the chain when the encoder is the bottleneck. The chain
+                // must be initiated from OFF the UI thread; every render()
+                // call site is a worker thread.
+                val st = LoopState()
+                fun drawFrame(f: Int) {
+                    if (st.stop) return
+                    web.evaluateJavascript(JsContracts.seekJs(f * 1000.0 / fps)) { _ ->
+                        // Draw INSIDE this callback - the seek is guaranteed
+                        // applied on this same UI-thread pass (pitfall 7.3).
+                        if (st.stop) return@evaluateJavascript
+                        try {
+                            val sc = surface.lockHardwareCanvas()
+                            sc.drawColor(VOID_COLOR)
+                            if (!full) {
+                                sc.save()
+                                sc.clipRect(frameRect)
+                                sc.translate(-frameRect.left.toFloat(), -frameRect.top.toFloat())
+                                web.draw(sc)
+                                sc.restore()
+                            } else {
+                                web.draw(sc)
+                            }
+                            surface.unlockCanvasAndPost(sc)
+                            if (f == 0) {
+                                // frame0.png QC (acceptance 4): a fresh
+                                // SOFTWARE draw of frame 0 - never PixelCopy
+                                // from the encoder surface (single consumer).
+                                firstFrame = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { g ->
+                                    val fc = Canvas(g)
+                                    fc.drawColor(VOID_COLOR)
+                                    if (!full) {
+                                        fc.save()
+                                        fc.clipRect(frameRect)
+                                        fc.translate(-frameRect.left.toFloat(), -frameRect.top.toFloat())
+                                        web.draw(fc)
+                                        fc.restore()
+                                    } else {
+                                        web.draw(fc)
+                                    }
+                                }
+                            }
+                            st.done = f + 1
+                            if (f + 1 < totalFrames && !st.stop) {
+                                // Section 7.15 pause (single-render): halt the
+                                // chain AT the frame boundary - the UI thread
+                                // must never block on a full surface buffer
+                                // queue (that would ANR); the worker thread
+                                // resumes the chain when unpaused.
+                                if (isPaused()) st.paused = true else drawFrame(f + 1)
+                            }
+                        } catch (e: Exception) {
+                            // Surface ops CAN throw: record and fail cleanly
+                            // on the worker thread, no UI crash.
+                            st.error = e
+                            st.stop = true
+                        }
+                    }
+                }
+                activity.runOnUiThread { drawFrame(0) }
+                while (st.done < totalFrames && !st.stop && st.error == null) {
+                    if (isCancelled()) {
+                        st.stop = true
+                        break
+                    }
+                    if (st.paused) {
+                        // The chain halted itself at a frame boundary (pause).
+                        // Wait here; resume exactly where it stopped. The
+                        // stall watchdog below must NOT fire during a pause.
+                        if (!isPaused()) {
+                            st.paused = false
+                            activity.runOnUiThread { drawFrame(st.done) }
+                        } else {
+                            Thread.sleep(200)
+                        }
+                        continue
+                    }
+                    encoder.drain(false)
+                    if (st.done > 0) report(st.done - 1)
+                    sample(true)
+                    // Stall watchdog: the chain normally advances within
+                    // milliseconds; 10 s of zero progress means the UI thread
+                    // or the page hung - fail the render, not the phone. A
+                    // PAUSE is quiet, not a stall: if the app was backgrounded
+                    // while the chain sat at a boundary (st.paused), the
+                    // watchdog must NOT fire - the outer loop's pause branch
+                    // above owns waiting and resuming.
+                    val stable = st.done
+                    val deadline = System.currentTimeMillis() + 10_000
+                    while (st.done == stable && !st.stop && st.error == null &&
+                        !st.paused && !isCancelled() &&
+                        System.currentTimeMillis() < deadline) {
+                        encoder.drain(false)
+                        sample(true)
+                        Thread.sleep(2)
+                    }
+                    if (st.done == stable && !st.stop && st.error == null &&
+                        !st.paused && !isCancelled()) {
+                        throw RuntimeException("frame $stable timed out")
+                    }
+                }
+                st.error?.let {
+                    throw RuntimeException("frame ${st.done} draw failed: ${it.message}")
+                }
+                if (st.stop && st.done < totalFrames) {
                     encoder.release()
                     outputFile.delete()
                     return RenderOutcome.Cancelled
                 }
-                var drawError: Exception? = null
-                val latch = CountDownLatch(1)
-                activity.runOnUiThread {
-                    web.evaluateJavascript(JsContracts.seekJs(f * 1000.0 / fps)) { _ ->
-                        // Draw INSIDE this callback - the seek is guaranteed
-                        // applied on this same UI-thread pass (pitfall 7.3).
-                        try {
-                            if (gpuDirect) {
-                                // FAST PATH: web.draw() into the encoder
-                                // surface's HARDWARE canvas - the GL functor
-                                // renders GPU-side, no CPU pixels. Surface
-                                // ops on THIS thread (it owns the surface).
-                                val sc = surface.lockHardwareCanvas()
-                                sc.drawColor(VOID_COLOR) // page void color
-                                sc.save()
-                                sc.clipRect(frameRect) // only the 16:9 region
-                                sc.translate(-frameRect.left.toFloat(), -frameRect.top.toFloat())
-                                web.draw(sc)
-                                sc.restore()
-                                surface.unlockCanvasAndPost(sc)
-                            } else {
-                                // SOFTWARE FALLBACK (original pipeline):
-                                // synchronous GPU->CPU readback; the render
-                                // thread uploads the bitmap below.
+            } else {
+                // ===== SOFTWARE FALLBACK: legacy per-frame loop =====
+                // The shared frameBmp is reused per frame, so the UI chain
+                // must not run ahead of the blit - the latch per frame (draw
+                // N, await N, blit N, issue N+1) keeps the bitmap contents
+                // stable. Correctness first: the readback path is already
+                // the slow path.
+                for (f in 0 until totalFrames) {
+                    // Section 7.15 pause (single-render): wait at the frame
+                    // boundary; cancel wins over resume.
+                    while (isPaused() && !isCancelled()) Thread.sleep(200)
+                    if (isCancelled()) {
+                        encoder.release()
+                        outputFile.delete()
+                        return RenderOutcome.Cancelled
+                    }
+                    var drawError: Exception? = null
+                    val latch = CountDownLatch(1)
+                    activity.runOnUiThread {
+                        web.evaluateJavascript(JsContracts.seekJs(f * 1000.0 / fps)) { _ ->
+                            try {
                                 val c = Canvas(frameBmp)
                                 c.drawColor(VOID_COLOR)
-                                c.save()
-                                c.clipRect(frameRect)
-                                c.translate(-frameRect.left.toFloat(), -frameRect.top.toFloat())
-                                web.draw(c)
-                                c.restore()
-                            }
-                            if (f == 0) {
-                                // frame0.png QC (acceptance 4): a fresh
-                                // SOFTWARE draw of frame 0 - never PixelCopy
-                                // from the encoder surface (single consumer),
-                                // never the old post-loop copy (which
-                                // exported the LAST frame as "frame0").
-                                firstFrame = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { g ->
-                                    val fc = Canvas(g)
-                                    fc.drawColor(VOID_COLOR)
-                                    fc.save()
-                                    fc.clipRect(frameRect)
-                                    fc.translate(-frameRect.left.toFloat(), -frameRect.top.toFloat())
-                                    web.draw(fc)
-                                    fc.restore()
+                                if (!full) {
+                                    c.save()
+                                    c.clipRect(frameRect)
+                                    c.translate(-frameRect.left.toFloat(), -frameRect.top.toFloat())
+                                    web.draw(c)
+                                    c.restore()
+                                } else {
+                                    web.draw(c)
                                 }
+                                if (f == 0) {
+                                    firstFrame = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { g ->
+                                        val fc = Canvas(g)
+                                        fc.drawColor(VOID_COLOR)
+                                        if (!full) {
+                                            fc.save()
+                                            fc.clipRect(frameRect)
+                                            fc.translate(-frameRect.left.toFloat(), -frameRect.top.toFloat())
+                                            web.draw(fc)
+                                            fc.restore()
+                                        } else {
+                                            web.draw(fc)
+                                        }
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                drawError = e
+                            } finally {
+                                latch.countDown()
                             }
-                        } catch (e: Exception) {
-                            // Surface ops CAN throw (fast path): record and
-                            // fail cleanly on the worker thread, no UI crash.
-                            drawError = e
-                        } finally {
-                            latch.countDown()
                         }
                     }
-                }
-                if (!latch.await(10, TimeUnit.SECONDS)) {
-                    throw RuntimeException("frame $f timed out")
-                }
-                drawError?.let {
-                    throw RuntimeException("frame $f draw failed: ${it.message}")
-                }
-                if (!gpuDirect) {
+                    if (!latch.await(10, TimeUnit.SECONDS)) {
+                        throw RuntimeException("frame $f timed out")
+                    }
+                    drawError?.let {
+                        throw RuntimeException("frame $f draw failed: ${it.message}")
+                    }
                     val sc = surface.lockHardwareCanvas()
                     sc.drawBitmap(frameBmp, null, Rect(0, 0, w, h), blit)
                     surface.unlockCanvasAndPost(sc)
-                }
-                encoder.drain(false)
-
-                if (f % 30 == 0 || f == totalFrames - 1) {
-                    val elapsed = (System.currentTimeMillis() - t0) / 1000.0
-                    if (elapsed > 0.5) {
-                        val done = f + 1
-                        val rate = done / elapsed
-                        val eta = if (rate > 0) ((totalFrames - done) / rate).toLong() else -1L
-                        onProgress(done, totalFrames, rate, eta)
-                    }
+                    encoder.drain(false)
+                    report(f)
+                    sample(false)
                 }
             }
 
@@ -874,6 +1011,56 @@ class RenderEngine(private val activity: Activity) {
             return false
         }
         return true
+    }
+
+    /** Cross-thread state for the self-driven (GPU path) frame chain. */
+    private class LoopState {
+        @Volatile
+        var done = 0     // frames drawn
+
+        @Volatile
+        var stop = false // cancel: stop issuing further frames
+
+        @Volatile
+        var paused = false // section 7.15: chain halted itself at a boundary
+
+        @Volatile
+        var error: Exception? = null
+    }
+
+    /**
+     * One-line system readout for the RENDER screen (~1 Hz): app RAM (PSS),
+     * best-effort GPU busy % (Adreno sysfs; omitted on SoCs that do not
+     * expose it - Android has NO public GPU-utilization API, so nothing is
+     * ever fabricated), and the live pipeline (GPU-direct vs CPU readback).
+     */
+    private fun sampleSys(gpuDirect: Boolean): String {
+        val pssMb = try {
+            val mi = Debug.MemoryInfo()
+            Debug.getMemoryInfo(mi)
+            mi.totalPss / 1024
+        } catch (e: Exception) {
+            ((Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1048576L).toInt()
+        }
+        val sb = StringBuilder("MEM ").append(pssMb).append(" MB")
+        gpuBusyPct()?.let { g -> sb.append(" · GPU ").append(g).append("%") }
+        sb.append(" · ").append(if (gpuDirect) "GPU DIRECT" else "CPU READBACK")
+        return sb.toString()
+    }
+
+    /** Best-effort Adreno utilization; null when not exposed (non-Snapdragon
+     *  SoCs and some Snapdragon kernels). Never guessed, never faked. */
+    private fun gpuBusyPct(): Int? {
+        for (p in listOf(
+            "/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage",
+            "/sys/class/kgsl/kgsl-3d0/devfreq/gpu_load"
+        )) {
+            try {
+                File(p).readText().trim().removeSuffix("%").trim().toIntOrNull()?.let { return it }
+            } catch (_: Exception) {
+            }
+        }
+        return null
     }
 
     /** Activity.onDestroy ONLY (pitfall 7.9) - never call mid-render. */
