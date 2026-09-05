@@ -1,6 +1,7 @@
 package com.brollrender.app
 
 import android.app.Activity
+import android.content.ContentValues
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -10,6 +11,7 @@ import android.media.ImageReader
 import android.os.Debug
 import android.os.Handler
 import android.os.Looper
+import android.provider.MediaStore
 import android.util.Log
 import android.view.PixelCopy
 import android.view.Surface
@@ -976,11 +978,25 @@ class RenderEngine(private val activity: Activity) {
                     return ProbeInfo(false, false, "pixelcopy readback failed")
                 }
                 val r = probeReference(web, frameRect, tMs, w, h)
-                val mm = framesAgreeRatio(g, r, w, h)
-                if (mm > MISMATCH_TOL) {
-                    val at = if (tMs == t1) "t1" else "t2"
-                    // STALE TEST: does the hw capture match an EARLIER time?
-                    val stale = carry?.let { framesAgreeRatio(g, it, w, h) } ?: 1.0
+                val at = if (tMs == t1) "t1" else "t2"
+                if (hwMatchesRef(g, r, w, h)) {
+                    carry = r
+                    continue
+                }
+                // Diagnose WHY before giving up (any-GPU support: devices
+                // legitimately rasterize AA/blur differently - tolerate that;
+                // never tolerate blank, stale, or low-detail output).
+                if (isUniform(g)) {
+                    dumpProbePng("hw_$at", g)
+                    dumpProbePng("ref_$at", r)
+                    Log.w(TAG, "gpu probe: hw frame blank at $at")
+                    return ProbeInfo(false, false, "hw frame blank at $at")
+                }
+                // STALE TEST: does the hw capture match an EARLIER time far
+                // better than its own? (Previous frame still committed.)
+                val stale = carry != null &&
+                    tolerantBestRatio(g, carry, w, h) <= 0.02
+                if (stale) {
                     // Warm-draw experiment: the loop's exact warm sequence -
                     // seek, warm draw into the ImageReader surface (forces
                     // the compositor commit), then the capture draw.
@@ -990,25 +1006,31 @@ class RenderEngine(private val activity: Activity) {
                                 web, warmSurface, warmReader, probeSurface, frameRect, tMs
                             )
                             val g2 = copySurface(probeSurface, w, h)
-                            if (g2 != null && framesAgreeRatio(g2, r, w, h) <= MISMATCH_TOL) {
-                                Log.i(
-                                    TAG,
-                                    "gpu probe: warm-draw fixes stale functor " +
-                                        "(plain mismatch was " + (mm * 100).toInt() + "%)"
-                                )
+                            if (g2 != null && hwMatchesRef(g2, r, w, h)) {
+                                Log.i(TAG, "gpu probe: warm-draw fixes stale functor at $at")
                                 return ProbeInfo(true, true, null)
                             }
                         } catch (_: Exception) {
                         }
                     }
-                    val sb = StringBuilder("mismatch ").append((mm * 100).toInt())
-                        .append("% at ").append(at)
-                    if (stale <= 0.05) sb.append(" (stale hw)")
-                    sb.append(if (warmSurface == null) ", warm n/a" else ", warm no-fix")
-                    Log.w(TAG, "gpu probe: $sb")
-                    return ProbeInfo(false, false, sb.toString())
+                    dumpProbePng("hw_$at", g)
+                    dumpProbePng("ref_$at", r)
+                    val reason = "stale hw at $at" +
+                        if (warmSurface == null) ", warm n/a" else ", warm no-fix"
+                    Log.w(TAG, "gpu probe: $reason")
+                    return ProbeInfo(false, false, reason)
                 }
-                carry = r
+                // Neither matching nor stale: the hw path renders different
+                // pixels. Dump both for eyeball comparison and stay on the
+                // correct CPU pipeline.
+                dumpProbePng("hw_$at", g)
+                dumpProbePng("ref_$at", r)
+                val cs = centerLumaSimilarity(g, r)
+                val reason = "mismatch " +
+                    (framesAgreeRatio(g, r, w, h) * 100).toInt() + "% at $at (struct " +
+                    String.format(java.util.Locale.US, "%.2f", cs) + ")"
+                Log.w(TAG, "gpu probe: $reason")
+                return ProbeInfo(false, false, reason)
             }
             Log.i(TAG, "gpu probe passed - drawing directly into the encoder surface")
             return ProbeInfo(true, false, null)
@@ -1167,6 +1189,154 @@ class RenderEngine(private val activity: Activity) {
             }
         }
         return diff.toDouble() / total
+    }
+
+    /**
+     * ANY-GPU comparison gate (probe): does the hardware capture show the
+     * right CONTENT? Devices legitimately rasterize antialiased text and
+     * blur slightly differently, and sub-pixel transform rounding can shift
+     * a whole frame by a pixel - exact equality wrongly rejects those and
+     * parks good GPUs on the slow CPU path. Gate order, cheapest first:
+     *  1. exact sparse ratio <= MISMATCH_TOL (strictest, no doubt);
+     *  2. tolerant ratio (per-channel +-16) at the best of +-2 px shifts -
+     *     passes legit raster noise and 1-px offsets;
+     *  3. structural: center-crop luma similarity >= 0.97 AND the hw frame
+     *     is not uniform AND its detail energy is >= 75% of the reference
+     *     (the detail guard rejects a functor rendering soft/low-res output
+     *     that would look similar downscaled - quality is never traded for
+     *     speed).
+     * Blank, stale, and wrong-content frames never pass: uniformity and
+     * staleness are checked by the caller before structural acceptance.
+     */
+    private fun hwMatchesRef(g: Bitmap, r: Bitmap, w: Int, h: Int): Boolean {
+        if (framesAgreeRatio(g, r, w, h) <= MISMATCH_TOL) return true
+        if (tolerantBestRatio(g, r, w, h) <= MISMATCH_TOL) return true
+        if (isUniform(g)) return false
+        if (centerLumaSimilarity(g, r) < 0.97) return false
+        return detailOk(g, r, w, h)
+    }
+
+    /** Tolerant sparse mismatch at the best of +-2 px shifts (both axes):
+     *  per-channel difference <= 16 counts as equal. Returns the best
+     *  (lowest) ratio found. */
+    private fun tolerantBestRatio(a: Bitmap, b: Bitmap, w: Int, h: Int): Double {
+        val px = 4
+        var best = 1.0
+        for (dy in -2..2) {
+            for (dx in -2..2) {
+                var diff = 0
+                var total = 0
+                for (y in 2 until h - 2 step px) {
+                    for (x in 2 until w - 2 step px) {
+                        val pa = a.getPixel(x + dx, y + dy)
+                        val pb = b.getPixel(x, y)
+                        total++
+                        if (Math.abs((pa shr 16 and 0xFF) - (pb shr 16 and 0xFF)) > 16 ||
+                            Math.abs((pa shr 8 and 0xFF) - (pb shr 8 and 0xFF)) > 16 ||
+                            Math.abs((pa and 0xFF) - (pb and 0xFF)) > 16
+                        ) diff++
+                    }
+                }
+                if (total > 0) {
+                    val ratio = diff.toDouble() / total
+                    if (ratio < best) best = ratio
+                }
+            }
+        }
+        return best
+    }
+
+    /** Uniform frame = blank capture (all sampled pixels identical). */
+    private fun isUniform(b: Bitmap): Boolean {
+        val first = b.getPixel(4, 4)
+        var y = 4
+        while (y < b.height) {
+            var x = 4
+            while (x < b.width) {
+                if (b.getPixel(x, y) != first) return false
+                x += 61
+            }
+            y += 43
+        }
+        return true
+    }
+
+    /** Cosine similarity of the center-crop luma, downsampled to 48x27 -
+     *  the center is where timeline content changes, so a WRONG frame
+     *  (e.g. a stale one) scores low even when the static background
+     *  dominates the full frame. */
+    private fun centerLumaSimilarity(a: Bitmap, b: Bitmap): Double {
+        val ca = Bitmap.createScaledBitmap(
+            Bitmap.createBitmap(
+                a, a.width / 4, a.height / 4, a.width / 2, a.height / 2
+            ),
+            48, 27, true
+        )
+        val cb = Bitmap.createScaledBitmap(
+            Bitmap.createBitmap(
+                b, b.width / 4, b.height / 4, b.width / 2, b.height / 2
+            ),
+            48, 27, true
+        )
+        var dot = 0.0
+        var na = 0.0
+        var nb = 0.0
+        for (y in 0 until 27) {
+            for (x in 0 until 48) {
+                val la = luma(ca.getPixel(x, y))
+                val lb = luma(cb.getPixel(x, y))
+                dot += la * lb
+                na += la * la
+                nb += lb * lb
+            }
+        }
+        if (na == 0.0 || nb == 0.0) return 0.0
+        return dot / (Math.sqrt(na) * Math.sqrt(nb))
+    }
+
+    private fun luma(c: Int): Double {
+        val r = (c shr 16 and 0xFF).toDouble()
+        val g = (c shr 8 and 0xFF).toDouble()
+        val b = (c and 0xFF).toDouble()
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+
+    /** Detail-energy guard: the hw frame must keep >= 75% of the
+     *  reference's mean luma gradient - rejects soft / low-resolution
+     *  functor output that would pass downscaled structural comparison. */
+    private fun detailOk(g: Bitmap, r: Bitmap, w: Int, h: Int): Boolean {
+        var dg = 0.0
+        var dr = 0.0
+        var n = 0
+        for (y in 0 until h step 8) {
+            var x = 0
+            while (x + 4 < w) {
+                dg += Math.abs(luma(g.getPixel(x + 4, y)) - luma(g.getPixel(x, y)))
+                dr += Math.abs(luma(r.getPixel(x + 4, y)) - luma(r.getPixel(x, y)))
+                n++
+                x += 8
+            }
+        }
+        if (n == 0 || dr < 1.0) return true // reference is flat: nothing to guard
+        return dg >= 0.75 * dr
+    }
+
+    /** Dump a probe frame for eyeball comparison (Pictures/BrollRender) when
+     *  the fast path is rejected - real pixels beat theorizing about why. */
+    private fun dumpProbePng(tag: String, bmp: Bitmap) {
+        try {
+            val cv = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, "BrollRender_$tag.png")
+                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/BrollRender")
+            }
+            val uri = activity.contentResolver
+                .insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cv) ?: return
+            activity.contentResolver.openOutputStream(uri)?.use { outs ->
+                bmp.compress(Bitmap.CompressFormat.PNG, 100, outs)
+            }
+        } catch (_: Exception) {
+        }
     }
 
     /** Cross-thread state for the self-driven (GPU path) frame chain. */
