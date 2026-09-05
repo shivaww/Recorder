@@ -108,6 +108,13 @@ class MainActivity : Activity() {
      * index 0; never remove it during a screen transition. */
     private var currentScreen: View? = null
 
+    // REMOTE (Kaggle) state
+    private lateinit var securePrefs: remote.SecurePrefs
+    private lateinit var jobStore: remote.JobStore
+    private val remoteJobs = mutableListOf<remote.JobStore.JobMeta>()
+    @Volatile private var remotePolling = false
+    private var remotePollThread: Thread? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         engine = RenderEngine(this)
@@ -121,6 +128,10 @@ class MainActivity : Activity() {
         setContentView(root)
         // Purge block files orphaned by a previous session.
         blockDir().deleteRecursively()
+        // Init remote render state
+        securePrefs = remote.SecurePrefs(this)
+        jobStore = remote.JobStore(this)
+        remoteJobs.addAll(jobStore.loadAll())
         showPickScreen()
     }
 
@@ -132,6 +143,7 @@ class MainActivity : Activity() {
         // wake lock keep the CPU running (that is the whole point).
         if (rendering && !batchRunning) renderPaused = true
         if (!batchRunning) window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        stopRemotePolling()
     }
 
     override fun onResume() {
@@ -140,6 +152,7 @@ class MainActivity : Activity() {
         if (rendering && !batchRunning) {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
+        startRemotePolling()
     }
 
     override fun onDestroy() {
@@ -260,6 +273,14 @@ class MainActivity : Activity() {
                 dp(48)
             )
             setOnClickListener { showQueueScreen() }
+        })
+        col.addView(spacer(dp(8)))
+        col.addView(mkButton("RENDER VIA KAGGLE").apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(48)
+            )
+            setOnClickListener { showRemoteQueueScreen() }
         })
         col.addView(spacer(dp(34)))
 
@@ -1480,3 +1501,423 @@ class MainActivity : Activity() {
         showScreen(android.widget.ScrollView(this).apply { addView(col) })
     }
 }
+
+    // ===================== REMOTE QUEUE SCREEN =====================
+
+    private fun showRemoteQueueScreen() {
+        val pad = dp(20)
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad)
+        }
+        col.addView(monoTv("REMOTE QUEUE (KAGGLE)", 22, AMBER, true))
+        col.addView(monoTv("queue html blocks - render on server", 12, TXT2))
+        col.addView(spacer(dp(16)))
+
+        // --- Connection Settings ---
+        col.addView(monoTv("SETTINGS", 11, TXT2))
+        val baseUrlInput = EditText(this).apply {
+            hint = "Base URL (Cloudflare Tunnel)"
+            setText(securePrefs.baseUrl)
+            setSingleLine(true)
+            setTextColor(TXT)
+            setHintTextColor(TXT2)
+            textSize = 12f
+            typeface = Typeface.MONOSPACE
+        }
+        col.addView(baseUrlInput)
+        val apiKeyInput = EditText(this).apply {
+            hint = "API Key"
+            setText(securePrefs.apiKey)
+            setSingleLine(true)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setTextColor(TXT)
+            setHintTextColor(TXT2)
+            textSize = 12f
+            typeface = Typeface.MONOSPACE
+        }
+        col.addView(apiKeyInput)
+        col.addView(spacer(dp(8)))
+        col.addView(mkButton("SAVE SETTINGS").apply {
+            setOnClickListener {
+                securePrefs.baseUrl = baseUrlInput.text.toString().trim()
+                securePrefs.apiKey = apiKeyInput.text.toString().trim()
+                showRemoteQueueScreen()
+            }
+        })
+        col.addView(mkButton("TEST CONNECTION").apply {
+            setOnClickListener {
+                val url = baseUrlInput.text.toString().trim()
+                val key = apiKeyInput.text.toString().trim()
+                if (url.isEmpty()) { return@setOnClickListener }
+                showBusy("Testing...")
+                Thread {
+                    val api = remote.RemoteApi(url, key)
+                    val (ok, latency) = api.testConnection()
+                    runOnUiThread {
+                        if (ok) showErrorScreen("Reachable\nLatency: ${latency}ms")
+                        else showErrorScreen("Unreachable")
+                    }
+                }.start()
+            }
+        })
+
+        col.addView(spacer(dp(20)))
+        col.addView(monoTv("QUEUE · ${blocks.size} BLOCK" + if (blocks.size == 1) "" else "S", 11, TXT2))
+        
+        blocks.forEachIndexed { i, b ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            row.addView(monoTv("B${i + 1}  ${b.name}", 12, TXT).apply {
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            row.addView(mkButton("X").apply {
+                setOnClickListener {
+                    blocks.removeAt(i)
+                    showRemoteQueueScreen()
+                }
+                layoutParams = LinearLayout.LayoutParams(dp(44), dp(36))
+            })
+            col.addView(row)
+            col.addView(spacer(dp(4)))
+        }
+        
+        col.addView(spacer(dp(8)))
+        col.addView(mkButton("+ ADD BLOCK (FILE)", filled = true).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48))
+            setOnClickListener {
+                queuePick = true
+                launchPicker()
+            }
+        })
+        col.addView(spacer(dp(8)))
+        col.addView(mkButton("+ PASTE BLOCK").apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44))
+            setOnClickListener { pasteBlock() }
+        })
+        if (blocks.isNotEmpty()) {
+            col.addView(spacer(dp(4)))
+            col.addView(mkButton("CLEAR QUEUE").apply {
+                setOnClickListener {
+                    blocks.clear()
+                    blockDir().deleteRecursively()
+                    blockSeq = 0
+                    showRemoteQueueScreen()
+                }
+            })
+        }
+        col.addView(spacer(dp(24)))
+
+        val qResRow = toggleRow(
+            col, "RESOLUTION",
+            listOf(
+                "4K" to { resW = 3840; resH = 2160; bitRate = 40_000_000 },
+                "1080p" to { resW = 1920; resH = 1080; bitRate = 16_000_000 },
+                "720p" to { resW = 1280; resH = 720; bitRate = 8_000_000 },
+                "480p" to { resW = 854; resH = 480; bitRate = 8_000_000 }
+            ),
+            if (resW == 3840) 0 else if (resW == 1920) 1 else if (resW == 1280) 2 else 3
+        )
+        val qFpsRow = toggleRow(
+            col, "FPS",
+            listOf(
+                "30" to { fps = 30 },
+                "24" to { fps = 24 },
+                "60" to { fps = 60 }
+            ),
+            if (fps == 30) 0 else if (fps == 24) 1 else 2
+        )
+        toggleRow(
+            col, "MODE",
+            listOf(
+                "FINAL" to {
+                    qResRow.select(0); resW = 1920; resH = 1080
+                    qFpsRow.select(0); fps = 30
+                    bitRate = 16_000_000
+                },
+                "DRAFT" to {
+                    qResRow.select(1); resW = 1280; resH = 720
+                    qFpsRow.select(1); fps = 24
+                    bitRate = 8_000_000
+                }
+            ),
+            if (resW == 1920 && fps == 30) 0 else 1
+        )
+        toggleRow(
+            col, "ENHANCE",
+            listOf(
+                "OFF" to { batchEnhance = false },
+                "ON" to { batchEnhance = true }
+            ),
+            if (batchEnhance) 1 else 0
+        )
+
+        col.addView(spacer(dp(20)))
+        col.addView(mkButton("SUBMIT REMOTE JOBS", filled = true).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52))
+            setOnClickListener { startRemoteSubmit() }
+        })
+        col.addView(spacer(dp(8)))
+        col.addView(mkButton("BACK").apply { setOnClickListener { showPickScreen() } })
+
+        showScreen(android.widget.ScrollView(this).apply { addView(col) })
+    }
+
+    private fun startRemoteSubmit() {
+        if (blocks.isEmpty()) {
+            showErrorScreen("No blocks queued")
+            return
+        }
+        val url = securePrefs.baseUrl
+        val key = securePrefs.apiKey
+        if (url.isEmpty() || key.isEmpty()) {
+            showErrorScreen("Missing Base URL or API Key")
+            return
+        }
+        
+        showBusy("Submitting jobs...")
+        Thread {
+            val api = remote.RemoteApi(url, key)
+            val resStr = "${resW}x${resH}"
+            var successCount = 0
+            
+            blocks.forEach { block ->
+                val jobId = api.submitJob(block.file, fps, resStr, 10, batchEnhance) // duration mocked to 10s for now
+                if (jobId != null) {
+                    val meta = remote.JobStore.JobMeta(
+                        jobId = jobId,
+                        fileName = block.name,
+                        createdAt = System.currentTimeMillis(),
+                        state = "QUEUED",
+                        fps = fps,
+                        resolution = resStr,
+                        duration = 10,
+                        enhance = batchEnhance
+                    )
+                    synchronized(remoteJobs) { remoteJobs.add(meta) }
+                    jobStore.saveAll(remoteJobs)
+                    successCount++
+                }
+            }
+            
+            runOnUiThread {
+                if (successCount > 0) {
+                    blocks.clear()
+                    blockDir().deleteRecursively()
+                    blockSeq = 0
+                    startRemotePolling()
+                    showRemoteJobsScreen()
+                } else {
+                    showErrorScreen("Failed to submit jobs. Check connection/API key.")
+                }
+            }
+        }.start()
+    }
+
+    private fun showRemoteJobsScreen() {
+        val pad = dp(20)
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad)
+        }
+        col.addView(monoTv("REMOTE JOBS", 22, AMBER, true))
+        col.addView(spacer(dp(16)))
+
+        synchronized(remoteJobs) {
+            if (remoteJobs.isEmpty()) {
+                col.addView(monoTv("No active jobs.", 12, TXT2))
+            } else {
+                remoteJobs.forEachIndexed { idx, job ->
+                    val card = LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setBackgroundColor(STROKE)
+                        setPadding(dp(14), dp(14), dp(14), dp(14))
+                    }
+                    card.addView(monoTv(job.fileName, 13, TXT, true))
+                    card.addView(monoTv("ID: ${job.jobId}", 10, TXT2))
+                    card.addView(monoTv("State: ${job.state}", 12, AMBER))
+                    
+                    if (job.state == "FAILED") {
+                        card.addView(mkButton("RETRY").apply {
+                            setOnClickListener { retryRemoteJob(job.jobId) }
+                        })
+                    } else if (job.state == "DONE" && !job.downloaded) {
+                        val dlBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                            max = 100
+                            progress = 0
+                        }
+                        val dlText = monoTv("", 10, TXT2)
+                        card.addView(dlBar)
+                        card.addView(dlText)
+                        card.addView(mkButton("DOWNLOAD", filled = true).apply {
+                            setOnClickListener { startRemoteDownload(idx, dlBar, dlText) }
+                        })
+                    } else if (job.downloaded) {
+                        card.addView(monoTv("Downloaded", 11, AMBER))
+                    } else {
+                        card.addView(mkButton("CANCEL").apply {
+                            setOnClickListener { cancelRemoteJob(idx) }
+                        })
+                    }
+                    col.addView(card)
+                    col.addView(spacer(dp(8)))
+                }
+            }
+        }
+        
+        col.addView(spacer(dp(20)))
+        col.addView(mkButton("BACK").apply { setOnClickListener { showPickScreen() } })
+        showScreen(android.widget.ScrollView(this).apply { addView(col) })
+    }
+
+    private fun startRemoteDownload(idx: Int, bar: ProgressBar, txt: TextView) {
+        val job = synchronized(remoteJobs) { remoteJobs.getOrNull(idx) } ?: return
+        showBusy("Starting download...")
+        Thread {
+            val url = securePrefs.baseUrl
+            val key = securePrefs.apiKey
+            val api = remote.RemoteApi(url, key)
+            
+            val tempFile = File(cacheDir, "broll_${job.jobId}.mp4")
+            val ok = api.downloadFile(job.jobId, tempFile) { pct, speedKbps ->
+                runOnUiThread {
+                    if (pct >= 0) {
+                        bar.progress = pct
+                        txt.text = "$pct% - ${String.format("%.1f", speedKbps)} KB/s"
+                    } else {
+                        txt.text = "${String.format("%.1f", speedKbps)} KB/s"
+                    }
+                }
+            }
+            
+            if (!ok) {
+                runOnUiThread { showErrorScreen("Download failed for ${job.fileName}") }
+                return@Thread
+            }
+            
+            // Export to MediaStore
+            val uri = exportTempToMediaStore(tempFile, job.fileName)
+            tempFile.delete()
+            if (uri == null) {
+                runOnUiThread { showErrorScreen("Failed to save ${job.fileName} to MediaStore") }
+                return@Thread
+            }
+            
+            // Local verification
+            var verified = false
+            try {
+                val r = MediaMetadataRetriever()
+                r.setDataSource(this, uri)
+                val vw = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+                val vh = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+                r.release()
+                verified = (vw > 0 && vh > 0)
+            } catch (_: Exception) {}
+            
+            if (verified) {
+                api.cancelJob(job.jobId) // DELETE to clean up server
+                synchronized(remoteJobs) {
+                    remoteJobs[idx].downloaded = true
+                    remoteJobs[idx].localUri = uri.toString()
+                }
+                jobStore.saveAll(remoteJobs)
+                runOnUiThread { showRemoteJobsScreen() }
+            } else {
+                runOnUiThread { showErrorScreen("Verification failed for ${job.fileName}") }
+            }
+        }.start()
+    }
+
+    private fun exportTempToMediaStore(tempFile: File, name: String): Uri? {
+        val stamp = System.currentTimeMillis()
+        val displayName = "BrollRender_${stamp}.mp4"
+        val vValues = ContentValues().apply {
+            put(MediaStore.Video.Media.DISPLAY_NAME, displayName)
+            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+            put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/BrollRender")
+            put(MediaStore.Video.Media.IS_PENDING, 1)
+        }
+        val uri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, vValues) ?: return null
+        try {
+            contentResolver.openOutputStream(uri)?.use { out ->
+                tempFile.inputStream().use { it.copyTo(out) }
+            }
+            vValues.clear()
+            vValues.put(MediaStore.Video.Media.IS_PENDING, 0)
+            contentResolver.update(uri, vValues, null, null)
+            return uri
+        } catch (e: Exception) {
+            contentResolver.delete(uri, null, null)
+            return null
+        }
+    }
+
+    private fun cancelRemoteJob(idx: Int) {
+        val job = synchronized(remoteJobs) { remoteJobs.getOrNull(idx) } ?: return
+        showBusy("Cancelling...")
+        Thread {
+            val api = remote.RemoteApi(securePrefs.baseUrl, securePrefs.apiKey)
+            api.cancelJob(job.jobId)
+            synchronized(remoteJobs) { 
+                remoteJobs[idx].state = "CANCELLED"
+            }
+            jobStore.saveAll(remoteJobs)
+            runOnUiThread { showRemoteJobsScreen() }
+        }.start()
+    }
+
+    private fun retryRemoteJob(jobId: String) {
+        // Basic retry: just reset state to QUEUED and let polling pick it up.
+        synchronized(remoteJobs) {
+            val idx = remoteJobs.indexOfFirst { it.jobId == jobId }
+            if (idx >= 0) remoteJobs[idx].state = "QUEUED"
+        }
+        jobStore.saveAll(remoteJobs)
+        startRemotePolling()
+        showRemoteJobsScreen()
+    }
+    private fun startRemotePolling() {
+        if (remotePolling) return
+        remotePolling = true
+        remotePollThread = Thread {
+            while (remotePolling) {
+                try {
+                    val url = securePrefs.baseUrl
+                    val key = securePrefs.apiKey
+                    if (url.isNotEmpty() && key.isNotEmpty()) {
+                        val api = remote.RemoteApi(url, key)
+                        var changed = false
+                        val jobsCopy = synchronized(remoteJobs) { remoteJobs.toList() }
+                        
+                        for (job in jobsCopy) {
+                            if (job.state == "DONE" || job.state == "FAILED" || job.state == "CANCELLED") continue
+                            val status = api.getStatus(job.jobId)
+                            if (status != null && status.state != job.state) {
+                                synchronized(remoteJobs) {
+                                    val idx = remoteJobs.indexOfFirst { it.jobId == job.jobId }
+                                    if (idx >= 0) remoteJobs[idx].state = status.state
+                                }
+                                changed = true
+                            }
+                            Thread.sleep(2000) // 1-2s for RENDERING/ENCODING
+                        }
+                        if (changed) {
+                            jobStore.saveAll(remoteJobs)
+                            runOnUiThread { if (currentScreen is android.widget.ScrollView) showRemoteJobsScreen() }
+                        }
+                    }
+                } catch (e: Exception) {
+                    // ignore polling errors, retry next loop
+                }
+                Thread.sleep(3000) // 3-5s for QUEUED
+            }
+        }.also { it.start() }
+    }
+
+    private fun stopRemotePolling() {
+        remotePolling = false
+        try { remotePollThread?.join(1500) } catch (_: Exception) {}
+        remotePollThread = null
+    }
