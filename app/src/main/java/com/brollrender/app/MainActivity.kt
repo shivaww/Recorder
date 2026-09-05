@@ -985,7 +985,7 @@ class MainActivity : Activity() {
                     )
                     continue
                 }
-                val secs = ((ok.durationMs + 999) / 1000).coerceIn(5, 600)
+                val secs = ((ok.durationMs + 999) / 1000).coerceIn(5L, 600L).toInt()
                 notifyBatch(
                     "Overnight render",
                     "block ${i + 1}/${queue.size} · ${resW}x${resH} @ ${fps}fps · ${secs}s"

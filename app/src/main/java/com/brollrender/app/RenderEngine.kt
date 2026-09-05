@@ -543,7 +543,6 @@ class RenderEngine(private val activity: Activity) {
      * = clean abort, partial file deleted. onStats: ~1 Hz RAM/GPU/pipeline
      * readout for the RENDER screen.
      */
-     */
     fun render(
         frameRect: Rect,
         fps: Int,
