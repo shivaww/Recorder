@@ -1,6 +1,8 @@
 package com.brollrender.app
 
 import android.app.Activity
+import android.app.Notification
+import android.app.NotificationManager
 import android.content.ClipboardManager
 import android.content.ContentValues
 import android.content.Context
@@ -12,6 +14,7 @@ import android.graphics.Rect
 import android.graphics.Typeface
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import android.provider.OpenableColumns
@@ -45,6 +48,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val REQ_PICK = 1
+        private const val REQ_NOTIF = 2
         private const val VOID = 0xFF0A0C10.toInt()
         private const val AMBER = 0xFFFFB454.toInt()
         private const val AMBER_DIM = 0x99FFB454.toInt()
@@ -77,6 +81,19 @@ class MainActivity : Activity() {
     @Volatile
     private var rendering = false
 
+    // BATCH (overnight) queue: staged block files live in internal storage
+    // (filesDir/blocks); only the block currently rendering is in RAM.
+    private val blocks = mutableListOf<Block>()
+    private var blockSeq = 0
+    private var batchEnhance = false
+
+    @Volatile
+    private var batchRunning = false
+
+    @Volatile
+    private var batchCancel = false
+    private var postNotifAsked = false
+
     // DONE state
     private var doneUri: Uri? = null
     private var doneName = ""
@@ -90,6 +107,8 @@ class MainActivity : Activity() {
         root = FrameLayout(this)
         root.setBackgroundColor(VOID)
         setContentView(root)
+        // Purge block files orphaned by a previous session.
+        blockDir().deleteRecursively()
         showPickScreen()
     }
 
@@ -97,18 +116,23 @@ class MainActivity : Activity() {
     // screen on only while rendering in the foreground.
     override fun onPause() {
         super.onPause()
-        if (rendering) renderPaused = true
-        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // Overnight batch: screen off must NOT pause the loop - the FGS +
+        // wake lock keep the CPU running (that is the whole point).
+        if (rendering && !batchRunning) renderPaused = true
+        if (!batchRunning) window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
     override fun onResume() {
         super.onResume()
         renderPaused = false
-        if (rendering) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        if (rendering && !batchRunning) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
     }
 
     override fun onDestroy() {
         cancelRequested = true
+        batchCancel = true
         renderThread?.join(1500)
         engine.destroy() // web.destroy() ONLY here (pitfall 7.9)
         super.onDestroy()
@@ -161,38 +185,94 @@ class MainActivity : Activity() {
             styleButton(this, filled)
         }
 
-    // ===================== PICK SCREEN (section 8.1) =====================
+    // ===================== PICK SCREEN (queue builder) =====================
+
+    /** One staged overnight-batch block: file in internal storage + label. */
+    private data class Block(val file: File, val name: String)
+
+    private fun blockDir(): File {
+        val d = File(filesDir, "blocks")
+        if (!d.exists()) d.mkdirs()
+        return d
+    }
+
+    /** Monotonic file names: removing a queued block never collides. */
+    private fun nextBlockFile(): File {
+        blockSeq += 1
+        return File(blockDir(), "b$blockSeq.html")
+    }
 
     private fun showPickScreen() {
         val pad = dp(20)
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
-            gravity = Gravity.CENTER_VERTICAL
         }
         col.addView(monoTv("BROLLRENDER", 26, AMBER, true))
-        col.addView(monoTv("HTML -> exact 16:9 MP4 / offscreen render", 12, TXT2))
-        col.addView(spacer(dp(28)))
-        col.addView(mkButton("CHOOSE HTML", filled = true).apply {
+        col.addView(monoTv("HTML -> exact 16:9 MP4 / overnight batch", 12, TXT2))
+        col.addView(spacer(dp(24)))
+
+        // ---- queue: add block 1, then + the next, until N ----
+        col.addView(
+            monoTv(
+                "QUEUE · ${blocks.size} BLOCK" + if (blocks.size == 1) "" else "S",
+                11, TXT2
+            )
+        )
+        blocks.forEachIndexed { i, b ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            row.addView(
+                monoTv("B${i + 1}  ${b.name}", 12, TXT).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+                    )
+                }
+            )
+            row.addView(
+                mkButton("X").apply {
+                    setOnClickListener {
+                        if (!batchRunning) {
+                            blocks.removeAt(i)
+                            showPickScreen()
+                        }
+                    }
+                    layoutParams = LinearLayout.LayoutParams(dp(44), dp(36))
+                }
+            )
+            col.addView(row)
+            col.addView(spacer(dp(4)))
+        }
+        col.addView(spacer(dp(8)))
+        col.addView(mkButton("+ ADD BLOCK (FILE)", filled = true).apply {
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(52)
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(48)
             )
             setOnClickListener { launchPicker() }
         })
         col.addView(spacer(dp(8)))
-        col.addView(mkButton("PASTE HTML").apply {
+        col.addView(mkButton("+ PASTE BLOCK").apply {
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(48)
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(44)
             )
             setOnClickListener { pasteHtml() }
         })
-        if (htmlFile != null) {
-            col.addView(spacer(dp(12)))
-            col.addView(monoTv("last: $htmlName", 12, TXT2))
+        if (blocks.isNotEmpty()) {
+            col.addView(spacer(dp(4)))
+            col.addView(mkButton("CLEAR QUEUE").apply {
+                setOnClickListener {
+                    if (!batchRunning) {
+                        blocks.clear()
+                        blockDir().deleteRecursively()
+                        blockSeq = 0
+                        showPickScreen()
+                    }
+                }
+            })
         }
-        col.addView(spacer(dp(34)))
+        col.addView(spacer(dp(24)))
 
         val resRow = toggleRow(
             col, "RESOLUTION",
@@ -230,11 +310,30 @@ class MainActivity : Activity() {
             ),
             if (resW == 1920 && fps == 30) 0 else 1
         )
-        prepared?.let { p ->
-            col.addView(spacer(dp(14)))
-            col.addView(monoTv("DURATION  auto ${p.durationMs / 1000} s - editable on preview", 12, TXT2))
-        }
-        showScreen(col)
+        // ENHANCE applies to every block in the batch (one global setting).
+        toggleRow(
+            col, "ENHANCE",
+            listOf(
+                "OFF" to { batchEnhance = false },
+                "ON" to { batchEnhance = true }
+            ),
+            if (batchEnhance) 1 else 0
+        )
+
+        col.addView(spacer(dp(20)))
+        col.addView(
+            mkButton(
+                if (blocks.isEmpty()) "START OVERNIGHT" else "START OVERNIGHT (${blocks.size})",
+                filled = true
+            ).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(52)
+                )
+                setOnClickListener { startOvernight() }
+            }
+        )
+
+        showScreen(android.widget.ScrollView(this).apply { addView(col) })
     }
 
     /** Two-option toggle row; select() restyles without re-running actions. */
@@ -297,7 +396,7 @@ class MainActivity : Activity() {
         startActivityForResult(i, REQ_PICK)
     }
 
-    /** Paste full HTML from clipboard (any length, Termux-style). */
+    /** Paste full HTML from clipboard into the queue as the next block. */
     private fun pasteHtml() {
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val text = cm.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
@@ -311,20 +410,14 @@ class MainActivity : Activity() {
             showErrorScreen("clipboard doesn't look like HTML - copy the full file content")
             return
         }
-        showBusy("WRITING PASTED HTML")
+        showBusy("STAGING BLOCK ${blocks.size + 1}")
         Thread {
             try {
-                val f = File(cacheDir, "pasted.html")
-                f.writeText(text)
-                htmlFile = f
-                htmlName = "pasted (${text.length / 1024}KB)"
-                runOnUiThread { showBusy("ANALYZING PAGE") }
-                val result = engine.prepare(f, resW, resH)
+                val dest = nextBlockFile()
+                dest.writeText(text)
                 runOnUiThread {
-                    when (result) {
-                        is RenderEngine.PrepareResult.Ok -> showPreviewScreen(result)
-                        is RenderEngine.PrepareResult.Fail -> showErrorScreen(result.message)
-                    }
+                    blocks.add(Block(dest, "pasted (${text.length / 1024}KB)"))
+                    showPickScreen()
                 }
             } catch (e: Exception) {
                 runOnUiThread { showErrorScreen("paste failed: ${e.message}") }
@@ -337,26 +430,21 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != REQ_PICK || resultCode != RESULT_OK) return
         val uri = data?.data ?: return
-        showBusy("COPYING HTML")
+        showBusy("STAGING BLOCK ${blocks.size + 1}")
         Thread {
             try {
-                // SAF stream fully copied to cache BEFORE loadUrl (pitfall 7.12).
-                val f = File(cacheDir, "broll.html")
+                // SAF stream fully copied to internal storage BEFORE any
+                // load (pitfall 7.12). The queue holds files, not RAM.
+                val dest = nextBlockFile()
                 contentResolver.openInputStream(uri)?.use { ins ->
-                    FileOutputStream(f).use { outs -> ins.copyTo(outs) }
+                    FileOutputStream(dest).use { outs -> ins.copyTo(outs) }
                 } ?: throw RuntimeException("cannot open selected file")
-                htmlFile = f
-                htmlName = queryName(uri)
-                runOnUiThread { showBusy("ANALYZING PAGE") }
-                val result = engine.prepare(f, resW, resH)
                 runOnUiThread {
-                    when (result) {
-                        is RenderEngine.PrepareResult.Ok -> showPreviewScreen(result)
-                        is RenderEngine.PrepareResult.Fail -> showErrorScreen(result.message)
-                    }
+                    blocks.add(Block(dest, queryName(uri)))
+                    showPickScreen()
                 }
             } catch (e: Exception) {
-                runOnUiThread { showErrorScreen("pick failed: ${e.message}") }
+                runOnUiThread { showErrorScreen("add block failed: ${e.message}") }
             }
         }.start()
     }
@@ -717,7 +805,7 @@ class MainActivity : Activity() {
         cancelRequested = false
         rendering = true
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        showRenderScreen(durationSec)
+        showRenderScreen("RENDERING", durationSec)
         renderThread = Thread {
             val outcome = runRenderJob(p, durationSec, zoom, enhance, sfxOn, textScale, sfxVol)
             rendering = false
@@ -741,14 +829,14 @@ class MainActivity : Activity() {
     private lateinit var renderStatus: TextView
     private var tempOutput: File? = null
 
-    private fun showRenderScreen(durationSec: Int) {
+    private fun showRenderScreen(title: String, durationSec: Int) {
         val pad = dp(20)
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
             gravity = Gravity.CENTER_VERTICAL
         }
-        col.addView(monoTv("RENDERING", 16, AMBER, true))
+        col.addView(monoTv(title, 16, AMBER, true))
         col.addView(monoTv("${resW}x${resH} @ ${fps}fps · ${durationSec}s", 12, TXT2))
         col.addView(spacer(dp(14)))
         renderBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
@@ -770,6 +858,7 @@ class MainActivity : Activity() {
             )
             setOnClickListener {
                 cancelRequested = true
+                batchCancel = true
                 isEnabled = false
                 text = "CANCELLING..."
                 renderStatus.text = "aborting - releasing encoder, deleting partial file"
@@ -832,6 +921,193 @@ class MainActivity : Activity() {
                 cancelRequested
             }
         )
+    }
+
+    // ===================== OVERNIGHT BATCH =====================
+
+    /**
+     * Start the queue. The FGS + wake lock keep the CPU alive with the
+     * screen off; blocks render ONE AT A TIME (only the current block is
+     * in the WebView/RAM); each finished MP4 is exported + verified before
+     * the next block loads. After the last block: summary notification,
+     * service stopped, app closes itself.
+     */
+    private fun startOvernight() {
+        if (blocks.isEmpty() || batchRunning) return
+        if (Build.VERSION.SDK_INT >= 33 && !postNotifAsked) {
+            // Progress is visible in the notification while the screen is
+            // off. Ask once; onRequestPermissionsResult re-enters here.
+            postNotifAsked = true
+            requestPermissions(
+                arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+                REQ_NOTIF
+            )
+            return
+        }
+        batchRunning = true
+        batchCancel = false
+        cancelRequested = false
+        rendering = true
+        RenderService.ensureChannel(this)
+        startForegroundService(Intent(this, RenderService::class.java))
+        val queue = blocks.toList()
+        renderThread = Thread {
+            val done = mutableListOf<String>()
+            val failed = mutableListOf<String>()
+            for ((i, b) in queue.withIndex()) {
+                if (batchCancel) break
+                notifyBatch("Overnight render", "block ${i + 1}/${queue.size} · preparing")
+                runOnUiThread { showBusy("PREPARING BLOCK ${i + 1}/${queue.size}") }
+                val prep = try {
+                    engine.prepare(b.file, resW, resH)
+                } catch (e: Exception) {
+                    RenderEngine.PrepareResult.Fail("prepare threw: ${e.message}")
+                }
+                val ok = prep as? RenderEngine.PrepareResult.Ok
+                if (ok == null) {
+                    failed.add(
+                        "B${i + 1} ${b.name}: " +
+                            (prep as? RenderEngine.PrepareResult.Fail)?.message.orEmpty()
+                    )
+                    continue
+                }
+                val secs = ((ok.durationMs + 999) / 1000).coerceIn(5, 600)
+                notifyBatch(
+                    "Overnight render",
+                    "block ${i + 1}/${queue.size} · ${resW}x${resH} @ ${fps}fps · ${secs}s"
+                )
+                runOnUiThread {
+                    showRenderScreen("RENDERING BLOCK ${i + 1}/${queue.size}", secs)
+                }
+                val out = File(cacheDir, "batch_tmp.mp4")
+                val outcome = engine.render(
+                    frameRect = ok.frameRect,
+                    fps = fps,
+                    totalFrames = secs * fps,
+                    outputFile = out,
+                    bitRate = bitRate,
+                    zoom = ok.suggestedZoom,
+                    enhance = batchEnhance,
+                    sfxEvents = ok.sfxEvents,
+                    sfxLoudness = ok.sfxLoudness ?: "normal",
+                    ambienceType = ok.ambienceType,
+                    ambienceGain = ok.ambienceGain,
+                    textScale = 1f,
+                    onProgress = { f, t, rate, eta ->
+                        runOnUiThread { updateRenderProgress(f, t, rate, eta) }
+                    },
+                    isCancelled = { batchCancel }
+                )
+                when (outcome) {
+                    is RenderEngine.RenderOutcome.Completed -> {
+                        val line = exportAndVerify(outcome.firstFrame, out, i + 1)
+                        if (line.startsWith("OK")) done.add(line) else failed.add(line)
+                    }
+                    RenderEngine.RenderOutcome.Cancelled -> break
+                    is RenderEngine.RenderOutcome.Failed ->
+                        failed.add("B${i + 1} ${b.name}: ${outcome.message}")
+                }
+            }
+            val wasCancelled = batchCancel
+            batchRunning = false
+            rendering = false
+            stopService(Intent(this, RenderService::class.java))
+            runOnUiThread {
+                if (wasCancelled) {
+                    cancelRequested = false
+                    batchCancel = false
+                    showPickScreen()
+                } else {
+                    batchSummary(done, failed)
+                }
+            }
+        }
+        renderThread?.start()
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_NOTIF) startOvernight() // proceed either way
+    }
+
+    /**
+     * Export one rendered block to MediaStore and verify it by reading the
+     * file back (worker thread). Returns "OK ..." or "FAIL ..." lines for
+     * the batch summary.
+     */
+    private fun exportAndVerify(firstFrame: Bitmap, tempFile: File, blockNo: Int): String {
+        return try {
+            val uri = exportToMediaStore(firstFrame, tempFile)
+                ?: return "FAIL B$blockNo: export failed"
+            var line = "OK B$blockNo"
+            try {
+                val r = MediaMetadataRetriever()
+                r.setDataSource(this, uri)
+                val durMs = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull() ?: 0L
+                val vw = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                    ?.toIntOrNull() ?: 0
+                val vh = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                    ?.toIntOrNull() ?: 0
+                r.release()
+                line += " ${vw}x${vh}" +
+                    if (vw == resW && vh == resH) " VERIFIED" else " MISMATCH"
+                line += " " + String.format(Locale.US, "%.1fs", durMs / 1000.0)
+            } catch (e: Exception) {
+                line += " (verify failed)"
+            }
+            line
+        } catch (e: Exception) {
+            "FAIL B$blockNo: ${e.message}"
+        }
+    }
+
+    /** Mirror batch progress into the FGS notification (screen-off view). */
+    private fun notifyBatch(title: String, text: String) {
+        try {
+            RenderService.ensureChannel(this)
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.notify(
+                RenderService.NOTE_ID,
+                Notification.Builder(this, RenderService.CH_ID)
+                    .setContentTitle(title)
+                    .setContentText(text)
+                    .setSmallIcon(R.mipmap.ic_launcher)
+                    .setOngoing(true)
+                    .setOnlyAlertOnce(true)
+                    .build()
+            )
+        } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * Morning report: one summary notification (tap to dismiss), then the
+     * app closes itself - videos are saved and verified.
+     */
+    private fun batchSummary(done: List<String>, failed: List<String>) {
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        try {
+            RenderService.ensureChannel(this)
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val lines = (done + failed).ifEmpty { listOf("no blocks") }
+            nm.notify(
+                RenderService.NOTE_ID + 1,
+                Notification.Builder(this, RenderService.CH_ID)
+                    .setContentTitle("Overnight batch: ${done.size} OK · ${failed.size} failed")
+                    .setContentText(lines.joinToString("; "))
+                    .setStyle(Notification.BigTextStyle().bigText(lines.joinToString("\n")))
+                    .setSmallIcon(R.mipmap.ic_launcher)
+                    .setAutoCancel(true)
+                    .build()
+            )
+        } catch (_: Exception) {
+        }
+        finishAndRemoveTask()
     }
 
     // ===================== EXPORT (section 5.9) =====================
