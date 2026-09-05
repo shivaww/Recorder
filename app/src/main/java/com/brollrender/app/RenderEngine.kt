@@ -597,12 +597,14 @@ class RenderEngine(private val activity: Activity) {
             val effectiveZoom = zoom ?: ZoomTransform(1f, 0f, 0f)
             evalJs(web, JsContracts.zoomJs(effectiveZoom.scale, effectiveZoom.panNx, effectiveZoom.panNy))
             Thread.sleep(150) // style recalc settles before frame 0's draw
-            if (textScale != 1f) {
-                // Page voice: proportional CSS zoom on <body>, independent of
-                // the framing transform on <html> above.
-                evalJs(web, JsContracts.textScaleJs(textScale))
-                Thread.sleep(100)
-            }
+            // Page voice: proportional CSS zoom on <body>, independent of
+            // the framing transform on <html> above. ALWAYS written, on or
+            // off - the same leak rule as the zoom transform and the ENHANCE
+            // filter: a stale body zoom from an earlier render of this same
+            // prepared page (CANCEL -> change TEXT -> render again) must
+            // never leak into the next render.
+            evalJs(web, JsContracts.textScaleJs(textScale))
+            Thread.sleep(100)
 
             // ENHANCE grade: now a root CSS filter (identical math to the
             // old ColorMatrix blit - see JsContracts.enhanceJs) so BOTH

@@ -165,19 +165,52 @@ object JsContracts {
     """.trimIndent()
 
     // Generic webfont check: the generation prompt may deviate from the
-    // default Anton + IBM Plex Mono pairing. Every family actually requested
-    // via the page's Google Fonts <link> is checked - all must be loaded.
+    // default Anton + IBM Plex Mono pairing. Every family AND WEIGHT
+    // actually requested via the page's Google Fonts <link> is checked -
+    // all must be loaded. Weight-aware: 'family=Syne:wght@800' registers
+    // ONLY an 800 face, so a weight-400 check never matches - the poll
+    // could never succeed for weight-specific requests (and the kick
+    // force-loaded the wrong weight, leaving display fonts on a narrower
+    // fallback: the squeezed-text render bug). checks[fam] ANDs all
+    // requested weights (upright, or italic when that is all there is).
     val FONTS_GENERIC_JS = """
         (() => {
           const fams = [];
-          document.querySelectorAll('link[href*="fonts.googleapis"]').forEach(l => {
-            (l.href.match(/family=[^&]+/g) || []).forEach(m => {
-              fams.push(decodeURIComponent(m.slice(7)).replace(/[+ ]/g, ' ').split(':')[0].trim());
+          const checks = {};
+          const parseSpec = (m) => {
+            const spec = decodeURIComponent(m.slice(7)).replace(/[+ ]/g, ' ').trim();
+            const ci = spec.indexOf(':');
+            const fam = (ci < 0 ? spec : spec.slice(0, ci)).trim();
+            if (!fam) return null;
+            let weights = ['400'];
+            const at = spec.indexOf('@');
+            if (ci >= 0 && at > ci) {
+              const ws = [];
+              spec.slice(at + 1).split(';').forEach((t) => {
+                const parts = t.split(',');
+                const w = parts[parts.length - 1].trim();
+                if (/^\d{3}$/.test(w) && ws.indexOf(w) < 0) ws.push(w);
+              });
+              if (ws.length) weights = ws;
+            }
+            return { fam: fam, weights: weights };
+          };
+          document.querySelectorAll('link[href*="fonts.googleapis"]').forEach((l) => {
+            (l.href.match(/family=[^&]+/g) || []).forEach((m) => {
+              const p = parseSpec(m);
+              if (!p || checks[p.fam] !== undefined) return;
+              fams.push(p.fam);
+              let ok = true;
+              p.weights.forEach((w) => {
+                if (!document.fonts.check(w + ' 16px "' + p.fam + '"') &&
+                    !document.fonts.check('italic ' + w + ' 16px "' + p.fam + '"')) {
+                  ok = false;
+                }
+              });
+              checks[p.fam] = ok;
             });
           });
-          const out = {};
-          fams.forEach(f => { out[f] = document.fonts.check('16px "' + f + '"'); });
-          return JSON.stringify({ families: fams, checks: out,
+          return JSON.stringify({ families: fams, checks: checks,
                                    status: document.fonts.status,
                                    faces: document.fonts.size });
         })()
@@ -186,25 +219,59 @@ object JsContracts {
     // Fonts kick: re-insert every Google Fonts <link> (a failed stylesheet
     // fetch leaves no @font-face rules - re-inserting the element forces a
     // retry through the normal loader) and explicitly document.fonts.load()
-    // each family - lazy font loads may never trigger on an offscreen,
-    // never-composited page. Fire-and-forget: the engine polls the checks.
+    // each family AT EVERY REQUESTED WEIGHT, upright and italic (a load()
+    // whose descriptor matches no registered face is a harmless no-op).
+    // Lazy font loads may never trigger on an offscreen, never-composited
+    // page, so this kick is the ONLY thing forcing weight-specific faces
+    // (e.g. family=Syne:wght@800) to load; without the weight the kick
+    // matched nothing and the page silently fell back to a narrower system
+    // font - the squeezed-text render bug. Fire-and-forget: engine polls.
     val FONTS_KICK_JS = """
         (() => {
-          document.querySelectorAll('link[href*="fonts.googleapis"]').forEach(l => {
+          document.querySelectorAll('link[href*="fonts.googleapis"]').forEach((l) => {
             const c = l.cloneNode();
             l.parentNode.replaceChild(c, l);
           });
-          const fams = [];
-          document.querySelectorAll('link[href*="fonts.googleapis"]').forEach(l => {
-            (l.href.match(/family=[^&]+/g) || []).forEach(m => {
-              fams.push(decodeURIComponent(m.slice(7)).replace(/[+ ]/g, ' ').split(':')[0].trim());
+          const parseSpec = (m) => {
+            const spec = decodeURIComponent(m.slice(7)).replace(/[+ ]/g, ' ').trim();
+            const ci = spec.indexOf(':');
+            const fam = (ci < 0 ? spec : spec.slice(0, ci)).trim();
+            if (!fam) return null;
+            let weights = ['400'];
+            const at = spec.indexOf('@');
+            if (ci >= 0 && at > ci) {
+              const ws = [];
+              spec.slice(at + 1).split(';').forEach((t) => {
+                const parts = t.split(',');
+                const w = parts[parts.length - 1].trim();
+                if (/^\d{3}$/.test(w) && ws.indexOf(w) < 0) ws.push(w);
+              });
+              if (ws.length) weights = ws;
+            }
+            return { fam: fam, weights: weights };
+          };
+          let jobs = 0;
+          document.querySelectorAll('link[href*="fonts.googleapis"]').forEach((l) => {
+            (l.href.match(/family=[^&]+/g) || []).forEach((m) => {
+              const p = parseSpec(m);
+              if (!p) return;
+              p.weights.forEach((w) => {
+                try {
+                  document.fonts.load(w + ' 16px "' + p.fam + '"', 'AaBbCc123');
+                  document.fonts.load('italic ' + w + ' 16px "' + p.fam + '"', 'AaBbCc123');
+                  jobs += 2;
+                } catch (e) {}
+              });
             });
           });
-          if (fams.length === 0) fams.push('Anton', 'IBM Plex Mono');
-          fams.forEach(f => {
-            try { document.fonts.load('16px "' + f + '"', 'AaBbCc123'); } catch (e) {}
-          });
-          return fams.length;
+          if (jobs === 0) {
+            try {
+              document.fonts.load('16px "Anton"', 'AaBbCc123');
+              document.fonts.load('16px "IBM Plex Mono"', 'AaBbCc123');
+              jobs = 2;
+            } catch (e) {}
+          }
+          return jobs;
         })()
     """.trimIndent()
 
