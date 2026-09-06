@@ -107,11 +107,13 @@ import subprocess
 import shutil
 import time
 import uuid
+import wave
 from concurrent.futures import ThreadPoolExecutor
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, unquote
 
+import numpy as np
 from playwright.sync_api import sync_playwright
 
 API_KEY = "your_secret_api_key_here"  # CHANGE THIS - must match the Android app
@@ -126,6 +128,8 @@ executor = ThreadPoolExecutor(max_workers=NUM_GPUS)
 
 _gpu_lock = threading.Lock()
 _next_gpu = [0]
+SAMPLE_RATE = 44100
+MASTER_GAIN = 0.45
 
 
 def assign_gpu():
@@ -163,6 +167,144 @@ def parse_multipart(body, boundary):
         elif name:
             fields[name] = content.decode()
     return fields, files
+
+
+def synth_slam(n):
+    t = np.arange(n) / SAMPLE_RATE
+    nz = np.random.RandomState(11).rand(n) * 2 - 1
+    f = 140.0 * np.exp(-t * 22.0) + 42.0
+    ph = np.cumsum(2 * np.pi * f / SAMPLE_RATE)
+    return np.sin(ph) * np.exp(-t * 14.0) + nz * np.exp(-t * 90.0) * 0.5
+
+def synth_boom(n):
+    t = np.arange(n) / SAMPLE_RATE
+    nz = np.random.RandomState(37).rand(n) * 2 - 1
+    f = 70.0 * np.exp(-t * 8.0) + 28.0
+    ph = np.cumsum(2 * np.pi * f / SAMPLE_RATE)
+    return np.sin(ph) * np.exp(-t * 6.0) + nz * np.exp(-t * 20.0) * 0.15
+
+def synth_whoosh(n):
+    nz = np.random.RandomState(23).rand(n) * 2 - 1
+    p = np.arange(n) / n
+    a = (0.04 + 0.46 * p)
+    lp = np.zeros(n)
+    for i in range(1, n):
+        lp[i] = lp[i-1] + a[i] * (nz[i] - lp[i-1])
+    amp = np.sin(np.pi * p) * 0.8
+    return lp * amp
+
+def synth_tick(n):
+    t = np.arange(n) / SAMPLE_RATE
+    nz = np.random.RandomState(31).rand(n) * 2 - 1
+    return nz * np.exp(-t * 400.0) * 0.9
+
+def synth_rise(n):
+    p = np.arange(n) / n
+    f = 180.0 * (1400.0 / 180.0) ** p
+    ph = np.cumsum(2 * np.pi * f / SAMPLE_RATE)
+    trem = 0.7 + 0.3 * np.sin(2 * np.pi * 7.0 * p)
+    amp = 0.15 + 0.55 * p
+    return np.sin(ph) * trem * amp
+
+def synth_ding(n):
+    t = np.arange(n) / SAMPLE_RATE
+    d = np.exp(-t * 8.0)
+    return (np.sin(2 * np.pi * 1318.0 * t) * 0.6 + np.sin(2 * np.pi * 1976.0 * t) * 0.25) * d
+
+def synth_pop(n):
+    p = np.arange(n) / n
+    f = 260.0 + 640.0 * p
+    ph = np.cumsum(2 * np.pi * f / SAMPLE_RATE)
+    return np.sin(ph) * (1.0 - p) * 0.8
+
+def synth_glitch(n):
+    t = np.arange(n) / SAMPLE_RATE
+    nz = np.random.RandomState(47).rand(n) * 2 - 1
+    gate = (np.sin(2 * np.pi * 60.0 * t) > 0).astype(float)
+    return nz * gate * np.exp(-t * 12.0) * 0.8
+
+def synth_sound(sid, n):
+    if sid == "slam": return synth_slam(n)
+    if sid == "boom": return synth_boom(n)
+    if sid == "whoosh": return synth_whoosh(n)
+    if sid == "rise": return synth_rise(n)
+    if sid == "ding": return synth_ding(n)
+    if sid == "pop": return synth_pop(n)
+    if sid == "glitch": return synth_glitch(n)
+    return synth_tick(n)
+
+def amb_drone(n):
+    t = np.arange(n) / SAMPLE_RATE
+    lfo = 0.6 + 0.4 * np.sin(2 * np.pi * 0.07 * t)
+    return (np.sin(2*np.pi*55.0*t) * 0.5 + np.sin(2*np.pi*82.5*t) * 0.3 + np.sin(2*np.pi*55.0*2.01*t) * 0.15) * lfo * 0.4
+
+def amb_pulse(n):
+    t = np.arange(n) / SAMPLE_RATE
+    beat_sec = 60.0 / 70.0
+    beat_phase = (t % beat_sec) / beat_sec
+    env = np.exp(-beat_phase * 6.0)
+    return np.sin(2*np.pi*50.0*t) * env * 0.5
+
+def amb_air(n):
+    nz = np.random.RandomState(99).rand(n) * 2 - 1
+    t = np.arange(n) / SAMPLE_RATE
+    mod = 0.7 + 0.3 * np.sin(2 * np.pi * 0.12 * t)
+    lp = np.zeros(n)
+    lp2 = np.zeros(n)
+    for i in range(1, n):
+        lp[i] = lp[i-1] + 0.02 * (nz[i] - lp[i-1])
+        lp2[i] = lp2[i-1] + 0.04 * (lp[i] - lp2[i-1])
+    return lp2 * mod * 0.6
+
+def amb_tension(n):
+    p = np.arange(n) / n
+    f1 = 80.0 + 120.0 * p
+    f2 = f1 * 1.5
+    ph1 = np.cumsum(2 * np.pi * f1 / SAMPLE_RATE)
+    ph2 = np.cumsum(2 * np.pi * f2 / SAMPLE_RATE)
+    amp = 0.2 + 0.3 * p
+    return (np.sin(ph1) * 0.5 + np.sin(ph2) * 0.3) * amp
+
+def get_ambience(typ, n):
+    if typ == "drone": raw = amb_drone(n)
+    elif typ == "pulse": raw = amb_pulse(n)
+    elif typ == "air": raw = amb_air(n)
+    elif typ == "tension": raw = amb_tension(n)
+    else: raw = amb_drone(n)
+    
+    fade_in = min(SAMPLE_RATE, n)
+    fade_out = min(2 * SAMPLE_RATE, n)
+    raw[:fade_in] *= np.arange(fade_in) / fade_in
+    raw[-fade_out:] *= np.arange(fade_out)[::-1] / fade_out
+    return raw
+
+def mix_audio(events, ambience_type, duration_sec, out_path):
+    total = int(duration_sec * SAMPLE_RATE) + SAMPLE_RATE // 4
+    acc = np.zeros(total, dtype=np.float32)
+    
+    if ambience_type:
+        bed = get_ambience(ambience_type, int(duration_sec * SAMPLE_RATE))
+        acc[:len(bed)] += bed * 0.25
+        
+    for e in events:
+        t_sec = e.get("t", 0)
+        eid = e.get("id", "tick")
+        gain = e.get("gain", 0.7)
+        n = int(0.8 * SAMPLE_RATE)
+        buf = synth_sound(eid, n)
+        start = int(t_sec * SAMPLE_RATE)
+        if start < 0 or start >= total: continue
+        end = min(start + len(buf), total)
+        acc[start:end] += buf[:end-start] * gain
+        
+    acc = acc / (1.0 + np.abs(acc))
+    acc = (acc * 32767.0 * MASTER_GAIN).astype(np.int16)
+    
+    with wave.open(out_path, 'w') as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(SAMPLE_RATE)
+        wf.writeframes(acc.tobytes())
 
 
 def process_job(job_id):
@@ -207,19 +349,40 @@ def process_job(job_id):
             page = browser.new_page(viewport={"width": width, "height": height}, device_scale_factor=1)
             page.goto(f"file://{html_path}", wait_until="networkidle")
             
-            # Wait for fonts and images (ported from JsContracts.kt)
             page.wait_for_function("document.fonts.status === 'loaded'", timeout=15000)
-            page.wait_for_function("""() => {
+            page.wait_for_function('''() => {
                 const imgs = document.querySelectorAll('img');
                 if (imgs.length === 0) return true;
                 for (const img of imgs) {
                     if (!img.complete || img.naturalWidth === 0) return false;
                 }
                 return true;
-            }""", timeout=15000)
+            }''', timeout=15000)
 
-            # Detect Frame (ported from DETECT_FRAME_JS)
-            detect_js = """(() => {
+            # SFX & Ambience manifests
+            sfx_manifest = page.evaluate('''(() => {
+              const el = document.querySelector('script#sfx[type="application/json"]');
+              if (!el) return { events: [] };
+              try {
+                const d = JSON.parse(el.textContent);
+                const evs = Array.isArray(d) ? d : (d.events || []);
+                return { events: evs.map(e => ({t: +e.t, id: String(e.id||'tick'), gain: Math.min(1, Math.max(0, +e.gain||0.7))})) };
+              } catch (err) { return { events: [] }; }
+            })()''')
+            
+            amb_manifest = page.evaluate('''(() => {
+              const el = document.querySelector('script#ambience[type="application/json"]');
+              if (!el) return null;
+              try {
+                const d = JSON.parse(el.textContent);
+                return { type: String(d.type||'drone') };
+              } catch (err) { return null; }
+            })()''')
+
+            wav_path = os.path.join(job_dir, "audio.wav")
+            mix_audio(sfx_manifest["events"], amb_manifest["type"] if amb_manifest else None, duration, wav_path)
+
+            detect_js = '''(() => {
               const el = document.querySelector('.fit')
                   || document.querySelector('#video-frame')
                   || [...document.querySelectorAll('div')].find(d => {
@@ -230,12 +393,11 @@ def process_job(job_id):
               if (!el) return null;
               const r = el.getBoundingClientRect();
               return { x: r.left, y: r.top, w: r.width, h: r.height };
-            })()"""
+            })()'''
             clip_bounds = page.evaluate(detect_js)
             
             if not clip_bounds:
-                # Fallback to content bounds (ported from CONTENT_BOUNDS_JS)
-                content_js = """(() => {
+                content_js = '''(() => {
                   const de = document.documentElement;
                   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
                   const els = document.body ? document.body.querySelectorAll('*') : [];
@@ -248,7 +410,7 @@ def process_job(job_id):
                   }
                   if (minX === Infinity) return null;
                   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
-                })()"""
+                })()'''
                 clip_bounds = page.evaluate(content_js)
                 if not clip_bounds:
                     raise RuntimeError("FRAME_NOT_FOUND and NO_CONTENT")
@@ -256,13 +418,12 @@ def process_job(job_id):
             if enhance:
                 page.evaluate("() => { document.documentElement.style.filter = 'saturate(1.18) contrast(1.12)'; }")
 
-            # Pause animations (ported from PAUSE_JS)
-            page.evaluate("""(() => {
+            page.evaluate('''(() => {
               const s = document.createElement('style');
               s.textContent = '*,*::before,*::after{animation-play-state:paused!important;animation-fill-mode:both!important}';
               document.head.appendChild(s);
               window.__a = document.getAnimations();
-            })()""")
+            })()''')
 
             for i in range(total_frames):
                 if cancel_event.is_set():
@@ -270,7 +431,6 @@ def process_job(job_id):
                     cleanup_and_mark("CANCELLED")
                     return
                 t_ms = (i / fps) * 1000
-                # Scrub animations (ported from SEEK_TEMPLATE)
                 seek_js = f"window.__a.forEach(a => a.currentTime = {t_ms}); if(window.__broll&&window.__broll.seek)window.__broll.seek({t_ms}/1000); void document.body.offsetHeight"
                 page.evaluate(seek_js)
                 
@@ -294,22 +454,26 @@ def process_job(job_id):
                 JOBS[job_id]["state"] = "ENCODING"
 
         output_mp4 = os.path.join(job_dir, "output.mp4")
-        base_cmd = [
+        ffmpeg_cmd = [
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
             "-framerate", str(fps),
             "-i", os.path.join(frames_dir, "frame_%05d.png"),
+            "-i", wav_path,
+            "-c:v", "h264_nvenc",
+            "-preset", "p5",
+            "-b:v", "16M",
             "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-b:a", "96k",
+            "-shortest",
+            output_mp4
         ]
         env = {**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu)}
-        r = subprocess.run(
-            base_cmd + ["-c:v", "h264_nvenc", "-preset", "p5", "-b:v", "16M", output_mp4],
-            env=env, capture_output=True, text=True
-        )
+        r = subprocess.run(ffmpeg_cmd, env=env, capture_output=True, text=True)
         if r.returncode != 0:
-            subprocess.run(
-                base_cmd + ["-c:v", "libx264", "-preset", "medium", "-b:v", "16M", output_mp4],
-                check=True
-            )
+            ffmpeg_cmd[7] = "libx264"
+            ffmpeg_cmd[9] = "medium"
+            subprocess.run(ffmpeg_cmd, check=True)
 
         shutil.rmtree(frames_dir, ignore_errors=True)
         with JOBS_LOCK:
