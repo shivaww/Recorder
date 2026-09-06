@@ -132,11 +132,19 @@ def render_frames(html_path, frames_dir, fps, resolution, duration, enhance,
         )
         page.goto(f"file://{html_path}", wait_until="networkidle")
 
-        # Wait for fonts
+        # Wait for fonts — critical for matching Chrome preview exactly.
+        # Force-load every declared face so no fallback substitution happens.
         try:
             page.wait_for_function("document.fonts.status === 'loaded'", timeout=15000)
+            page.evaluate("""async () => {
+                const faces = [...document.fonts];
+                await Promise.all(faces.map(f =>
+                    document.fonts.load(f.style + ' ' + f.weight + ' 16px "' + f.family + '"')
+                ));
+                await document.fonts.ready;
+            }""")
         except PWTimeout:
-            pass  # Continue anyway, fonts may be system fallbacks
+            pass  # Rare: continue with whatever loaded
 
         # Wait for images
         try:
