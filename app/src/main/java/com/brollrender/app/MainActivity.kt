@@ -1517,7 +1517,7 @@ class MainActivity : Activity() {
         col.addView(monoTv("1. Go to kaggle.com, create new notebook.\n2. Select 2x T4 GPU in Accelerator.\n3. Paste this ONE command in a cell and run it.", 12, TXT2))
         col.addView(spacer(dp(16)))
 
-        val bootstrapCmd = "!git clone https://github.com/shivaww/Recorder.git /kaggle/working/R && cd /kaggle/working/R/kaggle && python bootstrap.py"
+        val bootstrapCmd = "!git clone https://github.com/shivaww/Recorder.git /kaggle/working/R && cd /kaggle/working/R/kaggle && python -u bootstrap.py"
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(STROKE)

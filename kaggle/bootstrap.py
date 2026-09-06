@@ -22,19 +22,28 @@ CF_PATH = os.path.join(WORK, "cloudflared")
 
 
 def step(msg):
-    print(f"\n{'='*50}\n  {msg}\n{'='*50}")
+    print(f"\n{'='*50}\n  {msg}\n{'='*50}", flush=True)
+
+
+def run_live(cmd, **kwargs):
+    """Run a command, streaming its output to the notebook in real time."""
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, bufsize=1, **kwargs)
+    for line in proc.stdout:
+        print("   | " + line.rstrip(), flush=True)
+    proc.wait()
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, cmd)
 
 
 def install_deps():
     step("STEP 1/5: Installing dependencies")
 
-    print("  -> pip install playwright numpy...")
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "playwright", "numpy"],
-                   check=True, capture_output=True)
+    print("  -> pip install playwright numpy...", flush=True)
+    run_live([sys.executable, "-m", "pip", "install", "playwright", "numpy"])
 
-    print("  -> playwright install chromium...")
-    subprocess.run(["playwright", "install", "--with-deps", "chromium"],
-                   check=True, capture_output=True)
+    print("  -> playwright install chromium (takes a few minutes)...", flush=True)
+    run_live(["playwright", "install", "--with-deps", "chromium"])
 
     print("  -> downloading cloudflared...")
     if not os.path.exists(CF_PATH):
@@ -47,9 +56,9 @@ def install_deps():
 
     print("  -> verifying ffmpeg + NVENC...")
     if not shutil.which("ffmpeg"):
-        print("  -> installing ffmpeg...")
-        subprocess.run(["apt-get", "update", "-qq"], capture_output=True)
-        subprocess.run(["apt-get", "install", "-y", "-qq", "ffmpeg"], capture_output=True)
+        print("  -> installing ffmpeg...", flush=True)
+        run_live(["apt-get", "update", "-qq"])
+        run_live(["apt-get", "install", "-y", "ffmpeg"])
 
     r = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"], capture_output=True, text=True)
     if "h264_nvenc" in r.stdout:
