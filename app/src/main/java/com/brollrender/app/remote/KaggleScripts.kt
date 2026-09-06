@@ -135,30 +135,6 @@ def assign_gpu():
         return g
 
 
-def extract_font_families(html):
-    families = set()
-    for m in re.finditer(r'fonts\.googleapis\.com/css2\?family=([^"\'>]+)', html):
-        for fam in re.split(r'&family=', m.group(1)):
-            name = unquote(fam.split('&')[0].split(':')[0]).replace('+', ' ').strip()
-            if name:
-                families.add(name)
-    return families
-
-
-def wait_fonts(page, families, timeout=15.0):
-    page.evaluate("document.fonts.ready")
-    if not families:
-        return
-    js = """(names) => names.every(n =>
-        [...document.fonts].some(f => f.family.replace(/["']/g,'') === n && f.status === 'loaded'))"""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if page.evaluate(js, list(families)):
-            return
-        page.wait_for_timeout(100)
-    raise RuntimeError(f"Fonts not loaded: {families}")
-
-
 def parse_multipart(body, boundary):
     fields = {}
     files = {}
@@ -222,9 +198,6 @@ def process_job(job_id):
     try:
         width, height = map(int, resolution.split("x"))
         total_frames = int(fps * duration)
-        with open(html_path, "r", encoding="utf-8", errors="ignore") as f:
-            html = f.read()
-        families = extract_font_families(html)
 
         with sync_playwright() as p:
             browser = p.chromium.launch(args=[
@@ -233,19 +206,63 @@ def process_job(job_id):
             ])
             page = browser.new_page(viewport={"width": width, "height": height}, device_scale_factor=1)
             page.goto(f"file://{html_path}", wait_until="networkidle")
-            wait_fonts(page, families)
+            
+            # Wait for fonts and images (ported from JsContracts.kt)
+            page.wait_for_function("document.fonts.status === 'loaded'", timeout=15000)
+            page.wait_for_function("""() => {
+                const imgs = document.querySelectorAll('img');
+                if (imgs.length === 0) return true;
+                for (const img of imgs) {
+                    if (!img.complete || img.naturalWidth === 0) return false;
+                }
+                return true;
+            }""", timeout=15000)
 
-            frame_el = page.locator(".fit, #video-frame").first
-            target = frame_el if frame_el.count() > 0 else page
+            # Detect Frame (ported from DETECT_FRAME_JS)
+            detect_js = """(() => {
+              const el = document.querySelector('.fit')
+                  || document.querySelector('#video-frame')
+                  || [...document.querySelectorAll('div')].find(d => {
+                       const r = d.getBoundingClientRect();
+                       return r.width > 100 && Math.abs(r.width / r.height - 16 / 9) < 0.01
+                           && !!d.querySelector('.stage');
+                     });
+              if (!el) return null;
+              const r = el.getBoundingClientRect();
+              return { x: r.left, y: r.top, w: r.width, h: r.height };
+            })()"""
+            clip_bounds = page.evaluate(detect_js)
+            
+            if not clip_bounds:
+                # Fallback to content bounds (ported from CONTENT_BOUNDS_JS)
+                content_js = """(() => {
+                  const de = document.documentElement;
+                  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                  const els = document.body ? document.body.querySelectorAll('*') : [];
+                  for (const el of els) {
+                    if (el.offsetParent === null && getComputedStyle(el).position !== 'fixed') continue;
+                    const r = el.getBoundingClientRect();
+                    if (r.width < 1 || r.height < 1) continue;
+                    minX = Math.min(minX, r.left); minY = Math.min(minY, r.top);
+                    maxX = Math.max(maxX, r.right); maxY = Math.max(maxY, r.bottom);
+                  }
+                  if (minX === Infinity) return null;
+                  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+                })()"""
+                clip_bounds = page.evaluate(content_js)
+                if not clip_bounds:
+                    raise RuntimeError("FRAME_NOT_FOUND and NO_CONTENT")
 
             if enhance:
-                page.evaluate(
-                    "() => { let s = document.createElement('style'); "
-                    "s.textContent = 'html { filter: contrast(1.12) saturate(1.18); }'; "
-                    "document.head.appendChild(s); }"
-                )
+                page.evaluate("() => { document.documentElement.style.filter = 'saturate(1.18) contrast(1.12)'; }")
 
-            page.evaluate("document.getAnimations().forEach(a => a.pause())")
+            # Pause animations (ported from PAUSE_JS)
+            page.evaluate("""(() => {
+              const s = document.createElement('style');
+              s.textContent = '*,*::before,*::after{animation-play-state:paused!important;animation-fill-mode:both!important}';
+              document.head.appendChild(s);
+              window.__a = document.getAnimations();
+            })()""")
 
             for i in range(total_frames):
                 if cancel_event.is_set():
@@ -253,10 +270,15 @@ def process_job(job_id):
                     cleanup_and_mark("CANCELLED")
                     return
                 t_ms = (i / fps) * 1000
-                page.evaluate(
-                    "(t) => document.getAnimations().forEach(a => a.currentTime = t)", t_ms
+                # Scrub animations (ported from SEEK_TEMPLATE)
+                seek_js = f"window.__a.forEach(a => a.currentTime = {t_ms}); if(window.__broll&&window.__broll.seek)window.__broll.seek({t_ms}/1000); void document.body.offsetHeight"
+                page.evaluate(seek_js)
+                
+                page.screenshot(
+                    path=os.path.join(frames_dir, f"frame_{i:05d}.png"), 
+                    type="png",
+                    clip=clip_bounds
                 )
-                target.screenshot(path=os.path.join(frames_dir, f"frame_{i:05d}.png"), type="png")
                 with JOBS_LOCK:
                     if job_id in JOBS:
                         JOBS[job_id]["frame"] = i + 1
