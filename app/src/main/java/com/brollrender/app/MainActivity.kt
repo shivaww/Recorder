@@ -1840,7 +1840,6 @@ class MainActivity : Activity() {
     private fun startRemoteDownload(idx: Int, bar: ProgressBar, txt: TextView) {
         val job = synchronized(remoteJobs) { remoteJobs.getOrNull(idx) } ?: return
         Thread {
-        Thread {
             val url = securePrefs.baseUrl
             val key = securePrefs.apiKey
             val api = RemoteApi(url, key)
