@@ -30,6 +30,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.Toast
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
@@ -98,6 +99,7 @@ class MainActivity : Activity() {
     // SAF picker target: false = normal flow (CHOOSE HTML -> PREVIEW),
     // true = overnight queue (+ ADD BLOCK stages a block).
     private var queuePick = false
+    private var remoteQueuePick = false
 
     // DONE state
     private var doneUri: Uri? = null
@@ -332,6 +334,7 @@ class MainActivity : Activity() {
 
     /** Queue builder for the overnight batch - reached from home. */
     private fun showQueueScreen() {
+        remoteQueuePick = false
         val pad = dp(20)
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -587,7 +590,7 @@ class MainActivity : Activity() {
                 dest.writeText(text)
                 runOnUiThread {
                     blocks.add(Block(dest, "pasted (${text.length / 1024}KB)"))
-                    showQueueScreen()
+                    if (remoteQueuePick) showRemoteQueueScreen() else showQueueScreen()
                 }
             } catch (e: Exception) {
                 runOnUiThread { showErrorScreen("paste failed: ${e.message}") }
@@ -611,7 +614,7 @@ class MainActivity : Activity() {
                     } ?: throw RuntimeException("cannot open selected file")
                     runOnUiThread {
                         blocks.add(Block(dest, queryName(uri)))
-                        showQueueScreen()
+                        if (remoteQueuePick) showRemoteQueueScreen() else showQueueScreen()
                     }
                 } catch (e: Exception) {
                     runOnUiThread { showErrorScreen("add block failed: ${e.message}") }
@@ -1612,8 +1615,9 @@ class MainActivity : Activity() {
                     val api = RemoteApi(url, key)
                     val (ok, latency) = api.testConnection()
                     runOnUiThread {
-                        if (ok) showErrorScreen("Reachable\nLatency: ${latency}ms")
-                        else showErrorScreen("Unreachable")
+                        val msg = if (ok) "Reachable: ${latency}ms" else "Unreachable"
+                        Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
+                        showRemoteQueueScreen()
                     }
                 }.start()
             }
@@ -1646,13 +1650,17 @@ class MainActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48))
             setOnClickListener {
                 queuePick = true
+                remoteQueuePick = true
                 launchPicker()
             }
         })
         col.addView(spacer(dp(8)))
         col.addView(mkButton("+ PASTE BLOCK").apply {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44))
-            setOnClickListener { pasteBlock() }
+            setOnClickListener {
+                remoteQueuePick = true
+                pasteBlock()
+            }
         })
         if (blocks.isNotEmpty()) {
             col.addView(spacer(dp(4)))
@@ -1831,7 +1839,7 @@ class MainActivity : Activity() {
 
     private fun startRemoteDownload(idx: Int, bar: ProgressBar, txt: TextView) {
         val job = synchronized(remoteJobs) { remoteJobs.getOrNull(idx) } ?: return
-        showBusy("Starting download...")
+        Thread {
         Thread {
             val url = securePrefs.baseUrl
             val key = securePrefs.apiKey

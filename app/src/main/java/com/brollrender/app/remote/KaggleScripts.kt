@@ -3,7 +3,8 @@ package com.brollrender.app.remote
 object KaggleScripts {
     val step1 = """
 import subprocess
-import os
+import glob
+import shutil
 
 print("=== Installing Playwright ===")
 subprocess.run(["pip", "install", "-q", "playwright"], check=True)
@@ -13,7 +14,10 @@ print("\n=== Downloading FFmpeg (NVENC) ===")
 ffmpeg_url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
 subprocess.run(["wget", "-q", ffmpeg_url, "-O", "ffmpeg.tar.xz"], check=True)
 subprocess.run(["tar", "-xf", "ffmpeg.tar.xz"], check=True)
-subprocess.run(["cp", "ffmpeg-master-latest-linux64-gpl/bin/ff*", "/usr/local/bin/"], check=True)
+
+extracted_dir = glob.glob("ffmpeg-*-linux64-gpl")[0]
+for f in glob.glob(f"{extracted_dir}/bin/ff*"):
+    shutil.copy(f, "/usr/local/bin/")
 
 print("\n=== Verifying NVENC ===")
 result = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"], capture_output=True, text=True)
@@ -28,6 +32,7 @@ print("\n=== Setup Complete ===")
     val step2 = """
 import os
 import sys
+import subprocess
 import urllib.request
 from pathlib import Path
 import stat
@@ -76,11 +81,12 @@ def main():
         make_executable(BINARY_PATH)
 
     print("\nVerifying binary...")
-    try:
-        result = os.popen(f'"{BINARY_PATH}" --version').read().strip()
-        print(f"Version: {result}")
-    except Exception as e:
-        print(f"Could not run version check: {e}")
+    result = subprocess.run(
+        [str(BINARY_PATH), "--version"],
+        capture_output=True, text=True
+    )
+    version_output = result.stdout.strip() or result.stderr.strip()
+    print(f"Version: {version_output}" if version_output else "Could not run version check")
 
     print("\n" + "=" * 60)
     print("Ready!")
@@ -92,46 +98,78 @@ if __name__ == "__main__":
 """.trimIndent()
 
     val step3 = """
-import subprocess
-import sys
+%%writefile server.py
 import os
-import time
-
-PORT = 8000
-CF_PATH = "/kaggle/working/cloudflared"
-SERVER_SCRIPT = "/kaggle/working/server.py"
-
-SERVER_CODE = '''import os
+import re
 import json
 import threading
 import subprocess
 import shutil
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
+
 from playwright.sync_api import sync_playwright
 
-API_KEY = "your_secret_api_key_here" 
+API_KEY = "your_secret_api_key_here"  # CHANGE THIS - must match the Android app
 PORT = 8000
+NUM_GPUS = 2
 WORK_DIR = "/kaggle/working/broll_jobs"
 os.makedirs(WORK_DIR, exist_ok=True)
 
 JOBS = {}
 JOBS_LOCK = threading.Lock()
+executor = ThreadPoolExecutor(max_workers=NUM_GPUS)
+
+_gpu_lock = threading.Lock()
+_next_gpu = [0]
+
+
+def assign_gpu():
+    with _gpu_lock:
+        g = _next_gpu[0] % NUM_GPUS
+        _next_gpu[0] += 1
+        return g
+
+
+def extract_font_families(html):
+    families = set()
+    for m in re.finditer(r'fonts\.googleapis\.com/css2\?family=([^"\'>]+)', html):
+        for fam in re.split(r'&family=', m.group(1)):
+            name = unquote(fam.split('&')[0].split(':')[0]).replace('+', ' ').strip()
+            if name:
+                families.add(name)
+    return families
+
+
+def wait_fonts(page, families, timeout=15.0):
+    page.evaluate("document.fonts.ready")
+    if not families:
+        return
+    js = """(names) => names.every(n =>
+        [...document.fonts].some(f => f.family.replace(/["']/g,'') === n && f.status === 'loaded'))"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if page.evaluate(js, list(families)):
+            return
+        page.wait_for_timeout(100)
+    raise RuntimeError(f"Fonts not loaded: {families}")
+
 
 def parse_multipart(body, boundary):
     fields = {}
     files = {}
     parts = body.split(b"--" + boundary)
     for part in parts:
-        if part in (b"--", b"--\\r\\n", b"", b"\\r\\n") or b"\\r\\n\\r\\n" not in part:
+        if part in (b"--", b"--\r\n", b"", b"\r\n") or b"\r\n\r\n" not in part:
             continue
-        header_block, content = part.split(b"\\r\\n\\r\\n", 1)
+        header_block, content = part.split(b"\r\n\r\n", 1)
         content = content[:-2]
         headers = {}
-        for line in header_block.split(b"\\r\\n"):
+        for line in header_block.split(b"\r\n"):
             if b": " in line:
                 k, v = line.split(b": ", 1)
                 headers[k.lower()] = v
@@ -150,68 +188,125 @@ def parse_multipart(body, boundary):
             fields[name] = content.decode()
     return fields, files
 
+
 def process_job(job_id):
     with JOBS_LOCK:
         job = JOBS.get(job_id)
-        if not job: return
+        if not job or job["cancel_event"].is_set():
+            return
         job["state"] = "RENDERING"
+        gpu = job["gpu"]
+        html_path = job["html_path"]
+        fps = job["fps"]
+        resolution = job["resolution"]
+        duration = job["duration"]
+        enhance = job["enhance"]
+        cancel_event = job["cancel_event"]
+
     job_dir = os.path.join(WORK_DIR, job_id)
     frames_dir = os.path.join(job_dir, "frames")
     os.makedirs(frames_dir, exist_ok=True)
+
+    def cleanup_and_mark(state, error=None):
+        shutil.rmtree(frames_dir, ignore_errors=True)
+        with JOBS_LOCK:
+            if job_id in JOBS:
+                JOBS[job_id]["state"] = state
+                if error:
+                    JOBS[job_id]["error"] = error
+        if state == "CANCELLED":
+            shutil.rmtree(job_dir, ignore_errors=True)
+            with JOBS_LOCK:
+                JOBS.pop(job_id, None)
+
     try:
-        width, height = map(int, job["resolution"].split("x"))
-        total_frames = job["fps"] * job["duration"]
+        width, height = map(int, resolution.split("x"))
+        total_frames = int(fps * duration)
+        with open(html_path, "r", encoding="utf-8", errors="ignore") as f:
+            html = f.read()
+        families = extract_font_families(html)
+
         with sync_playwright() as p:
-            browser = p.chromium.launch(args=["--no-sandbox", "--hide-scrollbars"])
-            page = browser.new_page(viewport={"width": width, "height": height})
-            page.goto(f"file://{job['html_path']}", wait_until="networkidle")
-            page.evaluate("document.fonts.ready")
-            if job["enhance"]:
-                page.evaluate("() => { let s = document.createElement('style'); s.textContent = 'html { filter: contrast(1.12) saturate(1.18); }'; document.head.appendChild(s); }")
+            browser = p.chromium.launch(args=[
+                "--no-sandbox", "--hide-scrollbars",
+                "--disable-gpu", "--disable-dev-shm-usage",
+            ])
+            page = browser.new_page(viewport={"width": width, "height": height}, device_scale_factor=1)
+            page.goto(f"file://{html_path}", wait_until="networkidle")
+            wait_fonts(page, families)
+
+            frame_el = page.locator(".fit, #video-frame").first
+            target = frame_el if frame_el.count() > 0 else page
+
+            if enhance:
+                page.evaluate(
+                    "() => { let s = document.createElement('style'); "
+                    "s.textContent = 'html { filter: contrast(1.12) saturate(1.18); }'; "
+                    "document.head.appendChild(s); }"
+                )
+
+            page.evaluate("document.getAnimations().forEach(a => a.pause())")
+
             for i in range(total_frames):
-                if job_id not in JOBS: break
-                time_ms = (i / job["fps"]) * 1000
-                js_scrub = "document.getAnimations().forEach(a => { a.currentTime = " + str(time_ms) + "; a.pause(); });"
-                page.evaluate(js_scrub)
-                page.screenshot(path=os.path.join(frames_dir, f"frame_{i:05d}.png"), type="png")
+                if cancel_event.is_set():
+                    browser.close()
+                    cleanup_and_mark("CANCELLED")
+                    return
+                t_ms = (i / fps) * 1000
+                page.evaluate(
+                    "(t) => document.getAnimations().forEach(a => a.currentTime = t)", t_ms
+                )
+                target.screenshot(path=os.path.join(frames_dir, f"frame_{i:05d}.png"), type="png")
                 with JOBS_LOCK:
                     if job_id in JOBS:
                         JOBS[job_id]["frame"] = i + 1
                         JOBS[job_id]["total_frames"] = total_frames
             browser.close()
-        if job_id not in JOBS: return
+
+        if cancel_event.is_set():
+            cleanup_and_mark("CANCELLED")
+            return
+
         with JOBS_LOCK:
-            JOBS[job_id]["state"] = "ENCODING"
+            if job_id in JOBS:
+                JOBS[job_id]["state"] = "ENCODING"
+
         output_mp4 = os.path.join(job_dir, "output.mp4")
-        ffmpeg_cmd = [
+        base_cmd = [
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            "-framerate", str(job["fps"]),
+            "-framerate", str(fps),
             "-i", os.path.join(frames_dir, "frame_%05d.png"),
-            "-c:v", "h264_nvenc",
-            "-preset", "p5",
-            "-b:v", "16M",
             "-pix_fmt", "yuv420p",
-            output_mp4
         ]
-        subprocess.run(ffmpeg_cmd, check=True)
+        env = {**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu)}
+        r = subprocess.run(
+            base_cmd + ["-c:v", "h264_nvenc", "-preset", "p5", "-b:v", "16M", output_mp4],
+            env=env, capture_output=True, text=True
+        )
+        if r.returncode != 0:
+            subprocess.run(
+                base_cmd + ["-c:v", "libx264", "-preset", "medium", "-b:v", "16M", output_mp4],
+                check=True
+            )
+
         shutil.rmtree(frames_dir, ignore_errors=True)
         with JOBS_LOCK:
             if job_id in JOBS:
                 JOBS[job_id]["state"] = "DONE"
                 JOBS[job_id]["file_path"] = output_mp4
+
     except Exception as e:
-        with JOBS_LOCK:
-            if job_id in JOBS:
-                JOBS[job_id]["state"] = "FAILED"
-                JOBS[job_id]["error"] = str(e)
-        shutil.rmtree(frames_dir, ignore_errors=True)
+        cleanup_and_mark("FAILED", error=str(e))
+
 
 class Handler(BaseHTTPRequestHandler):
     def _send_json(self, code, data):
+        body = json.dumps(data).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(json.dumps(data).encode())
+        self.wfile.write(body)
 
     def _check_key(self):
         if self.headers.get("X-API-Key") != API_KEY:
@@ -220,71 +315,108 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def do_GET(self):
-        path = urlparse(self.path).path
-        if path == "/health":
-            self._send_json(200, {"status": "OK"})
-            return
-        if not self._check_key(): return
-        if path.startswith("/jobs/") and path.endswith("/status"):
-            job_id = path.split("/")[2]
-            with JOBS_LOCK:
-                job = JOBS.get(job_id)
-            if not job:
-                self._send_json(404, {"error": "Not found"})
+        try:
+            path = urlparse(self.path).path
+            if path == "/health":
+                self._send_json(200, {"status": "OK"})
                 return
-            self._send_json(200, {
-                "state": job["state"],
-                "progress": {"frame": job.get("frame", 0), "total_frames": job.get("total_frames", 0)},
-                "error": job.get("error")
-            })
-            return
-        if path.startswith("/jobs/") and path.endswith("/download"):
-            job_id = path.split("/")[2]
-            with JOBS_LOCK:
-                job = JOBS.get(job_id)
-            if not job or job["state"] != "DONE" or not os.path.exists(job.get("file_path", "")):
-                self._send_json(404, {"error": "Not found or not ready"})
+            if not self._check_key():
                 return
-            file_path = job["file_path"]
-            file_size = os.path.getsize(file_path)
-            self.send_response(200)
-            self.send_header("Content-Type", "video/mp4")
-            self.send_header("Content-Length", str(file_size))
-            self.end_headers()
-            with open(file_path, "rb") as f:
-                while chunk := f.read(8192):
-                    self.wfile.write(chunk)
-            return
+            parts = path.split("/")
+            if path.startswith("/jobs/") and path.endswith("/status") and len(parts) >= 3:
+                job_id = parts[2]
+                with JOBS_LOCK:
+                    job = JOBS.get(job_id)
+                if not job:
+                    self._send_json(404, {"error": "Not found"})
+                    return
+                self._send_json(200, {
+                    "state": job["state"],
+                    "progress": {"frame": job.get("frame", 0), "total_frames": job.get("total_frames", 0)},
+                    "error": job.get("error"),
+                })
+                return
+            if path.startswith("/jobs/") and path.endswith("/download") and len(parts) >= 3:
+                job_id = parts[2]
+                with JOBS_LOCK:
+                    job = JOBS.get(job_id)
+                if not job or job["state"] != "DONE" or not os.path.exists(job.get("file_path", "")):
+                    self._send_json(404, {"error": "Not found or not ready"})
+                    return
+                file_path = job["file_path"]
+                self.send_response(200)
+                self.send_header("Content-Type", "video/mp4")
+                self.send_header("Content-Length", str(os.path.getsize(file_path)))
+                self.end_headers()
+                with open(file_path, "rb") as f:
+                    while True:
+                        chunk = f.read(8192)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                return
+            self._send_json(404, {"error": "Unknown route"})
+        except Exception as e:
+            self._send_json(500, {"error": str(e)})
 
     def do_DELETE(self):
-        if not self._check_key(): return
-        path = urlparse(self.path).path
-        if path.startswith("/jobs/"):
-            job_id = path.split("/")[2]
-            with JOBS_LOCK:
-                if job_id in JOBS:
-                    del JOBS[job_id]
-            job_dir = os.path.join(WORK_DIR, job_id)
-            shutil.rmtree(job_dir, ignore_errors=True)
-            self.send_response(204)
-            self.end_headers()
-            return
+        try:
+            if not self._check_key():
+                return
+            path = urlparse(self.path).path
+            parts = path.split("/")
+            if path.startswith("/jobs/") and len(parts) >= 3:
+                job_id = parts[2]
+                with JOBS_LOCK:
+                    job = JOBS.get(job_id)
+                if not job:
+                    self._send_json(404, {"error": "Not found"})
+                    return
+                if job["state"] in ("DONE", "FAILED", "CANCELLED"):
+                    with JOBS_LOCK:
+                        JOBS.pop(job_id, None)
+                    shutil.rmtree(os.path.join(WORK_DIR, job_id), ignore_errors=True)
+                else:
+                    job["cancel_event"].set()
+                    with JOBS_LOCK:
+                        job["state"] = "CANCELLED"
+                self.send_response(204)
+                self.end_headers()
+                return
+            self._send_json(404, {"error": "Unknown route"})
+        except Exception as e:
+            self._send_json(500, {"error": str(e)})
 
     def do_POST(self):
-        if not self._check_key(): return
-        path = urlparse(self.path).path
-        if path == "/jobs":
+        try:
+            if not self._check_key():
+                return
+            path = urlparse(self.path).path
+            if path != "/jobs":
+                self._send_json(404, {"error": "Unknown route"})
+                return
             ctype = self.headers.get("Content-Type", "")
             if "boundary=" not in ctype:
                 self._send_json(400, {"error": "Invalid Content-Type"})
                 return
             boundary = ctype.split("boundary=")[1].encode()
-            length = int(self.headers.get("Content-Length", 0))
+            length = int(self.headers.get("Content-Length", 0) or 0)
             body = self.rfile.read(length)
             fields, files = parse_multipart(body, boundary)
             if "html" not in files:
                 self._send_json(400, {"error": "Missing html file"})
                 return
+
+            try:
+                fps = int(fields.get("fps", 30))
+                duration = float(fields.get("duration", 10))
+                resolution = fields.get("resolution", "1920x1080")
+                w, h = map(int, resolution.split("x"))
+                enhance = fields.get("enhance", "false").lower() == "true"
+            except (ValueError, IndexError):
+                self._send_json(400, {"error": "Invalid fps/duration/resolution"})
+                return
+
             job_id = str(uuid.uuid4())[:8]
             job_dir = os.path.join(WORK_DIR, job_id)
             os.makedirs(job_dir, exist_ok=True)
@@ -292,84 +424,75 @@ class Handler(BaseHTTPRequestHandler):
             html_path = os.path.join(job_dir, html_file["filename"] or "input.html")
             with open(html_path, "wb") as f:
                 f.write(html_file["data"])
-            fps = int(fields.get("fps", 30))
-            resolution = fields.get("resolution", "1920x1080")
-            duration = int(fields.get("duration", 10))
-            enhance = fields.get("enhance", "false") == "true"
+
             with JOBS_LOCK:
                 JOBS[job_id] = {
                     "state": "QUEUED",
                     "frame": 0,
-                    "total_frames": fps * duration,
+                    "total_frames": int(fps * duration),
                     "error": None,
                     "html_path": html_path,
                     "fps": fps,
                     "resolution": resolution,
                     "duration": duration,
-                    "enhance": enhance
+                    "enhance": enhance,
+                    "gpu": assign_gpu(),
+                    "cancel_event": threading.Event(),
                 }
-            threading.Thread(target=process_job, args=(job_id,), daemon=True).start()
+            executor.submit(process_job, job_id)
             self._send_json(200, {"job_id": job_id})
-            return
+        except Exception as e:
+            self._send_json(500, {"error": str(e)})
+
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
+
 
 if __name__ == "__main__":
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"Server listening on port {PORT}")
     server.serve_forever()
-'''
+""".trimIndent()
 
-def main():
-    print("Writing server script to disk...")
-    with open(SERVER_SCRIPT, "w") as f:
-        f.write(SERVER_CODE)
-        
-    if not os.path.exists(CF_PATH):
-        print("Error: cloudflared not found. Run 02_download_cloudflared.py first.")
-        return
+    val step4 = """
+import subprocess, sys, time, os
 
-    print("Starting BrollRender Server...")
-    server_proc = subprocess.Popen([sys.executable, SERVER_SCRIPT])
-    time.sleep(2)
+PORT = 8000
+CF_PATH = "/kaggle/working/cloudflared"
+SERVER_SCRIPT = "/kaggle/working/server.py"
 
-    print("Starting Cloudflare Tunnel...")
-    cf_proc = subprocess.Popen(
-        [CF_PATH, "tunnel", "--url", f"http://localhost:{PORT}"],
-        stderr=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        text=True
-    )
+if not os.path.exists(CF_PATH):
+    raise SystemExit("cloudflared not found - download it first.")
 
-    print("\n" + "=" * 60)
-    print("WAITING FOR PUBLIC URL...")
-    print("=" * 60 + "\n")
+print("Starting BrollRender Server...")
+server_proc = subprocess.Popen([sys.executable, SERVER_SCRIPT])
+time.sleep(2)
 
-    try:
-        while True:
-            line = cf_proc.stderr.readline()
-            if not line:
-                break
-            if "trycloudflare.com" in line:
-                parts = line.split()
-                for p in parts:
-                    if p.startswith("https://"):
-                        print("\n" + "=" * 60)
-                        print(f"PUBLIC BASE URL: {p}")
-                        print("=" * 60)
-                        print("\nEnter this URL and your API key in the Android app.\n")
-                        print("Server is running. Press Ctrl+C or stop the cell to quit.")
-            if cf_proc.poll() is not None or server_proc.poll() is not None:
-                print("A process exited unexpectedly. Shutting down.")
-                break
-    except KeyboardInterrupt:
-        print("\nShutting down...")
-    finally:
-        cf_proc.terminate()
-        server_proc.terminate()
+print("Starting Cloudflare Tunnel...")
+cf_proc = subprocess.Popen(
+    [CF_PATH, "tunnel", "--url", f"http://localhost:{PORT}"],
+    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+)
 
-if __name__ == "__main__":
-    main()
+print("\nWaiting for public URL...\n")
+try:
+    while True:
+        line = cf_proc.stdout.readline()
+        if not line:
+            break
+        if "trycloudflare.com" in line:
+            for tok in line.split():
+                if tok.startswith("https://"):
+                    print(f"\nPUBLIC BASE URL: {tok}")
+                    print("Enter this URL + API key in the app.\n")
+        if cf_proc.poll() is not None or server_proc.poll() is not None:
+            print("A process exited. Shutting down.")
+            break
+except KeyboardInterrupt:
+    print("\nShutting down...")
+finally:
+    cf_proc.terminate()
+    server_proc.terminate()
 """.trimIndent()
 }
