@@ -1514,43 +1514,39 @@ class MainActivity : Activity() {
             setPadding(pad, pad, pad, pad)
         }
         col.addView(monoTv("KAGGLE SETUP", 22, AMBER, true))
-        col.addView(monoTv("1. Go to kaggle.com, create new notebook.\n2. Select 2x T4 in Accelerator.\n3. Run these 3 scripts in 3 separate cells.", 12, TXT2))
+        col.addView(monoTv("1. Go to kaggle.com, create new notebook.\n2. Select 2x T4 GPU in Accelerator.\n3. Paste this ONE command in a cell and run it.", 12, TXT2))
+        col.addView(spacer(dp(16)))
+
+        val bootstrapCmd = "!git clone https://github.com/shivaww/Recorder.git /kaggle/working/R && cd /kaggle/working/R/kaggle && python bootstrap.py"
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(STROKE)
+            setPadding(dp(14), dp(14), dp(14), dp(14))
+        }
+        card.addView(monoTv("BOOTSTRAP COMMAND", 12, TXT, true))
+        card.addView(spacer(dp(8)))
+        card.addView(TextView(this).apply {
+            text = bootstrapCmd
+            textSize = 10f
+            typeface = Typeface.MONOSPACE
+            setTextColor(TXT2)
+            setHorizontallyScrolling(true)
+            maxLines = 4
+        })
+        card.addView(spacer(dp(8)))
+        card.addView(mkButton("COPY", filled = true).apply {
+            setOnClickListener {
+                val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("bootstrap", bootstrapCmd))
+                text = "COPIED!"
+                postDelayed({ text = "COPY" }, 2000)
+            }
+        })
+        col.addView(card)
+        col.addView(spacer(dp(16)))
+        col.addView(monoTv("After running, it will print your API KEY and BASE URL.\nEnter those in the next screen.", 11, TXT2))
         col.addView(spacer(dp(16)))
         
-        fun addScriptBlock(title: String, code: String) {
-            val card = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setBackgroundColor(STROKE)
-                setPadding(dp(14), dp(14), dp(14), dp(14))
-            }
-            card.addView(monoTv(title, 14, TXT, true))
-            card.addView(spacer(dp(8)))
-            val codeView = TextView(this).apply {
-                text = code
-                textSize = 10f
-                typeface = Typeface.MONOSPACE
-                setTextColor(TXT2)
-                setHorizontallyScrolling(true)
-                maxLines = 10
-                ellipsize = android.text.TextUtils.TruncateAt.END
-            }
-            card.addView(codeView)
-            card.addView(spacer(dp(8)))
-            card.addView(mkButton("COPY").apply {
-                setOnClickListener {
-                    val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("script", code))
-                    text = "COPIED!"
-                    postDelayed({ text = "COPY" }, 2000)
-                }
-            })
-            col.addView(card)
-            col.addView(spacer(dp(16)))
-        }
-
-        addScriptBlock("STEP 1: Install Essentials", KaggleScripts.step1)
-        addScriptBlock("STEP 2: Download Cloudflared", KaggleScripts.step2)
-        addScriptBlock("STEP 3: Launch Server", KaggleScripts.step3)
         
         col.addView(mkButton("CONTINUE TO KAGGLE RENDER", filled = true).apply {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52))
@@ -1804,7 +1800,15 @@ class MainActivity : Activity() {
                     card.addView(monoTv("ID: ${job.jobId}", 10, TXT2))
                     card.addView(monoTv("State: ${job.state}", 12, AMBER))
                     
-                    if (job.state == "FAILED") {
+                    if (job.state == "INVALID") {
+                        card.addView(monoTv("Validation failed — check HTML", 11, TXT2))
+                    } else if (job.state == "VALIDATING") {
+                        card.addView(monoTv("Validating HTML...", 11, TXT2))
+                    } else if (job.state == "WAITING_START") {
+                        card.addView(mkButton("START RENDER", filled = true).apply {
+                            setOnClickListener { startRemoteJob(job.jobId) }
+                        })
+                    } else if (job.state == "FAILED") {
                         card.addView(mkButton("RETRY").apply {
                             setOnClickListener { retryRemoteJob(job.jobId) }
                         })
@@ -1929,6 +1933,26 @@ class MainActivity : Activity() {
             }
             jobStore.saveAll(remoteJobs)
             runOnUiThread { showRemoteJobsScreen() }
+        }.start()
+    }
+
+    private fun startRemoteJob(jobId: String) {
+        showBusy("Starting render...")
+        Thread {
+            val api = RemoteApi(securePrefs.baseUrl, securePrefs.apiKey)
+            val ok = api.startJob(jobId)
+            runOnUiThread {
+                if (ok) {
+                    synchronized(remoteJobs) {
+                        val idx = remoteJobs.indexOfFirst { it.jobId == jobId }
+                        if (idx >= 0) remoteJobs[idx].state = "RENDERING"
+                    }
+                    jobStore.saveAll(remoteJobs)
+                    showRemoteJobsScreen()
+                } else {
+                    showErrorScreen("Failed to start render")
+                }
+            }
         }.start()
     }
 

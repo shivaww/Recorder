@@ -15,7 +15,11 @@ class RemoteApi(private val baseUrl: String, private val apiKey: String) {
         val state: String,
         val frame: Int = 0,
         val totalFrames: Int = 0,
-        val error: String? = null
+        val pct: Int = 0,
+        val etaSec: Int = -1,
+        val renderFps: Double = 0.0,
+        val error: String? = null,
+        val validationReason: String? = null
     )
 
     private fun connect(path: String, method: String, timeout: Int = 15000): HttpURLConnection {
@@ -97,7 +101,11 @@ class RemoteApi(private val baseUrl: String, private val apiKey: String) {
             val frame = Regex("\"frame\"\\s*:\\s*(\\d+)").find(resp)?.groupValues?.get(1)?.toIntOrNull() ?: 0
             val total = Regex("\"total_frames\"\\s*:\\s*(\\d+)").find(resp)?.groupValues?.get(1)?.toIntOrNull() ?: 0
             val error = Regex("\"error\"\\s*:\\s*\"([^\"]+)\"").find(resp)?.groupValues?.get(1)
-            JobStatus(state, frame, total, error)
+            val pct = Regex("\"pct\"\\s*:\\s*(\\d+)").find(resp)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val eta = Regex("\"eta_sec\"\\s*:\\s*(-?\\d+)").find(resp)?.groupValues?.get(1)?.toIntOrNull() ?: -1
+            val rfps = Regex("\"render_fps\"\\s*:\\s*([\\d.]+)").find(resp)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
+            val vReason = Regex("\"reason\"\\s*:\\s*\"([^\"]+)\"").find(resp)?.groupValues?.get(1)
+            JobStatus(state, frame, total, pct, eta, rfps, error, vReason)
         } catch (e: Exception) {
             null
         } finally {
@@ -140,6 +148,17 @@ class RemoteApi(private val baseUrl: String, private val apiKey: String) {
         }
     }
     
+    fun startJob(jobId: String): Boolean {
+        val conn = connect("/jobs/$jobId/start", "POST", 10000)
+        return try {
+            conn.responseCode in 200..299
+        } catch (e: Exception) {
+            false
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     fun cancelJob(jobId: String): Boolean {
         val conn = connect("/jobs/$jobId", "DELETE", 10000)
         return try {
