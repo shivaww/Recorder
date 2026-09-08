@@ -2048,10 +2048,18 @@ class MainActivity : Activity() {
                             } else if (code == -1) {
                                 val n = (jobFailCount[job.jobId] ?: 0) + 1
                                 jobFailCount[job.jobId] = n
-                                if (n >= 3) {
+                                synchronized(remoteJobs) {
+                                    val idx = remoteJobs.indexOfFirst { it.jobId == job.jobId }
+                                    if (idx >= 0) remoteJobs[idx].error = "reconnecting... ($n/6)"
+                                }
+                                if (n >= 6) {
+                                    val gpuAlive = api.getGpuUsage().isNotEmpty()
                                     synchronized(remoteJobs) {
                                         val idx = remoteJobs.indexOfFirst { it.jobId == job.jobId }
-                                        if (idx >= 0) { remoteJobs[idx].state = "FAILED"; remoteJobs[idx].error = "Server unreachable" }
+                                        if (idx >= 0) {
+                                            remoteJobs[idx].state = "FAILED"
+                                            remoteJobs[idx].error = if (gpuAlive) "Status endpoint error (server alive)" else "Server unreachable"
+                                        }
                                     }
                                     changed = true
                                 }
