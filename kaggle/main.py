@@ -267,6 +267,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
+            print(f"[http-raw] POST {self.path} key_present={self.headers.get('X-API-Key') is not None}", flush=True)
             if not self._check_key():
                 return
             path = urlparse(self.path).path
@@ -300,9 +301,13 @@ class Handler(BaseHTTPRequestHandler):
                 job_dir = os.path.join(WORK_DIR, job_id)
                 os.makedirs(job_dir, exist_ok=True)
                 html_file = files["html"]
+                data = html_file["data"]
+                if fields.get("encoding") == "base64":
+                    import base64 as b64mod
+                    data = b64mod.b64decode(data)
                 html_path = os.path.join(job_dir, html_file["filename"] or "input.html")
                 with open(html_path, "wb") as f:
-                    f.write(html_file["data"])
+                    f.write(data)
 
                 total_frames = int(fps * duration)
                 telemetry = JobTelemetry(job_id, total_frames)

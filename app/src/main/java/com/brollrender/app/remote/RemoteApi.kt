@@ -74,20 +74,17 @@ class RemoteApi(private val baseUrl: String, private val apiKey: String) {
             writeField("duration", duration)
             writeField("enhance", enhance)
             
+            writeField("encoding", "base64")
             out.write("--$boundary\r\n".toByteArray())
             out.write("Content-Disposition: form-data; name=\"html\"; filename=\"${htmlFile.name}\"\r\n".toByteArray())
-            out.write("Content-Type: text/html\r\n\r\n".toByteArray())
-            val totalBytes = htmlFile.length()
-            var sent = 0L
-            htmlFile.inputStream().use { input ->
-                val buf = ByteArray(8192)
-                while (true) {
-                    val n = input.read(buf)
-                    if (n < 0) break
-                    out.write(buf, 0, n)
-                    sent += n
-                    if (totalBytes > 0) onProgress?.invoke((sent * 100 / totalBytes).toInt())
-                }
+            out.write("Content-Type: application/octet-stream\r\n\r\n".toByteArray())
+            val b64Bytes = android.util.Base64.encodeToString(htmlFile.readBytes(), android.util.Base64.NO_WRAP).toByteArray()
+            var sent = 0
+            while (sent < b64Bytes.size) {
+                val n = minOf(8192, b64Bytes.size - sent)
+                out.write(b64Bytes, sent, n)
+                sent += n
+                onProgress?.invoke(sent * 100 / b64Bytes.size)
             }
             out.write("\r\n".toByteArray())
             
