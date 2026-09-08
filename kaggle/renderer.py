@@ -149,6 +149,17 @@ def render_frames(html_path, frames_dir, fps, resolution, duration, enhance,
             viewport={"width": width, "height": height},
             device_scale_factor=1
         )
+        try:
+            gl_renderer = page.evaluate("""() => {
+                const c = document.createElement('canvas');
+                const gl = c.getContext('webgl');
+                if (!gl) return 'NO_WEBGL';
+                const d = gl.getExtension('WEBGL_debug_renderer_info');
+                return d ? gl.getParameter(d.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+            }""")
+            print(f"[render] GL_RENDERER: {gl_renderer}", flush=True)
+        except Exception as ge:
+            print(f"[render] GL_RENDERER check failed: {ge}", flush=True)
         page.goto(f"file://{html_path}", wait_until="networkidle")
 
         # Wait for fonts — critical for matching Chrome preview exactly.
