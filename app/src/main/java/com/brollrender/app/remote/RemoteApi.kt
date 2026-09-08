@@ -28,7 +28,7 @@ class RemoteApi(private val baseUrl: String, private val apiKey: String) {
             requestMethod = method
             connectTimeout = timeout
             readTimeout = timeout
-            setRequestProperty("X-API-Key", apiKey)
+            setRequestProperty("X-API-Key", apiKey.trim())
             instanceFollowRedirects = true
         }
         return conn
