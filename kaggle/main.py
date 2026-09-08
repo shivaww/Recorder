@@ -34,6 +34,22 @@ JOBS_LOCK = threading.Lock()
 executor = ThreadPoolExecutor(max_workers=NUM_GPUS)
 
 _gpu_lock = threading.Lock()
+
+import faulthandler as _fh
+_status_enter = [0.0]
+
+
+def _status_watchdog():
+    import time as _t, sys as _sys
+    while True:
+        _t.sleep(3)
+        if _status_enter[0] and (_t.time() - _status_enter[0] > 6):
+            print("[watchdog] /status stuck >6s; dumping ALL thread stacks:", flush=True)
+            _fh.dump_traceback(file=_sys.stderr, all_threads=True)
+            _status_enter[0] = 0.0
+
+
+threading.Thread(target=_status_watchdog, daemon=True).start()
 _next_gpu = [0]
 
 
@@ -225,6 +241,7 @@ class Handler(BaseHTTPRequestHandler):
 
             if path.startswith("/jobs/") and path.endswith("/status") and len(parts) >= 3:
                 job_id = parts[2]
+                _status_enter[0] = __import__("time").time()
                 with JOBS_LOCK:
                     job = JOBS.get(job_id)
                 if not job:
@@ -235,6 +252,7 @@ class Handler(BaseHTTPRequestHandler):
                 if job["state"] in (STATE_VALID, STATE_INVALID, STATE_VALIDATING, STATE_WAITING_START):
                     status["state"] = job["state"]
                     status["validation"] = job.get("validation")
+                _status_enter[0] = 0.0
                 self._send_json(200, status)
                 return
 
