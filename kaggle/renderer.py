@@ -6,6 +6,8 @@ Reports progress via callback for real-time telemetry.
 """
 import os
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
 from config import CHROMIUM_FLAGS, CPU_FALLBACK_FLAGS
@@ -112,134 +114,167 @@ def extract_ambience_manifest(page):
     })()""")
 
 
+WORKER_COUNT = max(1, min(4, os.cpu_count() or 2))
+
+
+def _launch_browser(p):
+    """Launch Chromium with GPU flags; fall back to CPU-only flags."""
+    try:
+        browser = p.chromium.launch(headless=True, args=CHROMIUM_FLAGS)
+        print("[render] Chromium launched with Vulkan/GPU flags", flush=True)
+        return browser
+    except Exception:
+        import traceback
+        print("[render] GPU launch failed; falling back to CPU", flush=True)
+        traceback.print_exc()
+        return p.chromium.launch(headless=True, args=CPU_FALLBACK_FLAGS)
+
+
+def _prep_page(browser, html_path, width, height, enhance):
+    """Load page, wait for fonts/images, pause animations, apply enhance."""
+    page = browser.new_page(
+        viewport={"width": width, "height": height},
+        device_scale_factor=1
+    )
+    page.goto(f"file://{html_path}", wait_until="networkidle")
+    try:
+        page.wait_for_function("document.fonts.status === 'loaded'", timeout=15000)
+        page.evaluate("""async () => {
+            const faces = [...document.fonts];
+            await Promise.all(faces.map(f =>
+                document.fonts.load(f.style + ' ' + f.weight + ' 16px "' + f.family + '"')
+            ));
+            await document.fonts.ready;
+        }""")
+    except PWTimeout:
+        pass
+    try:
+        page.wait_for_function("""() => {
+            const imgs = document.querySelectorAll('img');
+            if (imgs.length === 0) return true;
+            for (const img of imgs) {
+                if (!img.complete || img.naturalWidth === 0) return false;
+            }
+            return true;
+        }""", timeout=15000)
+    except PWTimeout:
+        pass
+    page.evaluate("""() => {
+        const s = document.createElement('style');
+        s.textContent = '*,*::before,*::after{animation-play-state:paused!important;animation-fill-mode:both!important}';
+        document.head.appendChild(s);
+        window.__a = document.getAnimations();
+    }""")
+    if enhance:
+        page.evaluate("() => { document.documentElement.style.filter = 'saturate(1.18) contrast(1.12)'; }")
+    return page
+
+
+def _gl_renderer(page):
+    """Print the actual GL renderer string (NVIDIA T4 vs SwiftShader)."""
+    try:
+        r = page.evaluate("""() => {
+            const c = document.createElement('canvas');
+            const gl = c.getContext('webgl');
+            if (!gl) return 'NO_WEBGL';
+            const d = gl.getExtension('WEBGL_debug_renderer_info');
+            return d ? gl.getParameter(d.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+        }""")
+        print(f"[render] GL_RENDERER: {r}", flush=True)
+    except Exception as ge:
+        print(f"[render] GL_RENDERER check failed: {ge}", flush=True)
+
+
+# ─── PARALLEL FRAME CAPTURE ──────────────────────────────────────────────────
+
+def _render_slice(html_path, width, height, enhance, clip, frames_dir, fps,
+                  frame_ids, cancel_event, stop_event, on_frame):
+    """One worker: own browser, seeks + screenshots its contiguous frame range."""
+    with sync_playwright() as p:
+        browser = _launch_browser(p)
+        try:
+            page = _prep_page(browser, html_path, width, height, enhance)
+            t0 = time.time()
+            for i in frame_ids:
+                if cancel_event.is_set() or stop_event.is_set():
+                    raise RenderError("CANCELLED")
+                t_ms = (i / fps) * 1000
+                page.evaluate(
+                    f"window.__a.forEach(a => a.currentTime = {t_ms}); "
+                    f"if(window.__broll && window.__broll.seek) window.__broll.seek({t_ms}/1000); "
+                    f"void document.body.offsetHeight"
+                )
+                page.screenshot(
+                    path=os.path.join(frames_dir, f"frame_{i:05d}.png"),
+                    type="png",
+                    clip={
+                        "x": clip["x"],
+                        "y": clip["y"],
+                        "width": clip.get("width", clip.get("w")),
+                        "height": clip.get("height", clip.get("h")),
+                    }
+                )
+                on_frame()
+            dt = max(time.time() - t0, 1e-6)
+            print(f"[render] worker: {len(frame_ids)} frames in {dt:.1f}s "
+                  f"({len(frame_ids)/dt:.1f} fps)", flush=True)
+        finally:
+            browser.close()
+
+
 def render_frames(html_path, frames_dir, fps, resolution, duration, enhance,
                   cancel_event, progress_cb=None):
-    """Render all frames from HTML animation.
-
-    Args:
-        html_path: path to the HTML file
-        frames_dir: directory to write PNG frames
-        fps: frames per second
-        resolution: "WxH" string
-        duration: seconds
-        enhance: bool — apply contrast/saturation boost
-        cancel_event: threading.Event to signal cancellation
-        progress_cb: callback(frame, total_frames) for telemetry
-
-    Returns:
-        dict with sfx_events, ambience_type, clip_bounds
-
-    Raises:
-        RenderError on failure
-    """
+    """Render all frames: scout pass for manifests/clip, then N parallel workers."""
     os.makedirs(frames_dir, exist_ok=True)
     width, height = map(int, resolution.split("x"))
     total_frames = int(fps * duration)
 
+    # Scout pass: single browser computes manifests + clip bounds + GPU probe
     with sync_playwright() as p:
+        browser = _launch_browser(p)
         try:
-            browser = p.chromium.launch(headless=True, args=CHROMIUM_FLAGS)
-            print("[render] Chromium launched with Vulkan/GPU flags", flush=True)
-        except Exception as le:
-            import traceback
-            print("[render] GPU launch failed; falling back to CPU", flush=True)
-            traceback.print_exc()
-            browser = p.chromium.launch(headless=True, args=CPU_FALLBACK_FLAGS)
-        page = browser.new_page(
-            viewport={"width": width, "height": height},
-            device_scale_factor=1
-        )
-        try:
-            gl_renderer = page.evaluate("""() => {
-                const c = document.createElement('canvas');
-                const gl = c.getContext('webgl');
-                if (!gl) return 'NO_WEBGL';
-                const d = gl.getExtension('WEBGL_debug_renderer_info');
-                return d ? gl.getParameter(d.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
-            }""")
-            print(f"[render] GL_RENDERER: {gl_renderer}", flush=True)
-        except Exception as ge:
-            print(f"[render] GL_RENDERER check failed: {ge}", flush=True)
-        page.goto(f"file://{html_path}", wait_until="networkidle")
+            page = _prep_page(browser, html_path, width, height, enhance)
+            _gl_renderer(page)
+            sfx_manifest = extract_sfx_manifest(page)
+            amb_manifest = extract_ambience_manifest(page)
+            raw_bounds = detect_content_bounds(page)
+            clip = enforce_16_9(raw_bounds, width, height)
+            print(f"[render] raw_bounds={raw_bounds} clip={clip}", flush=True)
+        finally:
+            browser.close()
 
-        # Wait for fonts — critical for matching Chrome preview exactly.
-        # Force-load every declared face so no fallback substitution happens.
-        try:
-            page.wait_for_function("document.fonts.status === 'loaded'", timeout=15000)
-            page.evaluate("""async () => {
-                const faces = [...document.fonts];
-                await Promise.all(faces.map(f =>
-                    document.fonts.load(f.style + ' ' + f.weight + ' 16px "' + f.family + '"')
-                ));
-                await document.fonts.ready;
-            }""")
-        except PWTimeout:
-            pass  # Rare: continue with whatever loaded
+    workers = max(1, min(WORKER_COUNT, total_frames))
+    step = max(1, (total_frames + workers - 1) // workers)
+    slices = [list(range(s, min(s + step, total_frames)))
+              for s in range(0, total_frames, step)]
+    print(f"[render] parallel workers: {workers} "
+          f"({[len(s) for s in slices]} frames each)", flush=True)
 
-        # Wait for images
-        try:
-            page.wait_for_function("""() => {
-                const imgs = document.querySelectorAll('img');
-                if (imgs.length === 0) return true;
-                for (const img of imgs) {
-                    if (!img.complete || img.naturalWidth === 0) return false;
-                }
-                return true;
-            }""", timeout=15000)
-        except PWTimeout:
-            pass
+    done = [0]
+    lock = threading.Lock()
+    stop_event = threading.Event()
 
-        # Extract SFX and ambience manifests
-        sfx_manifest = extract_sfx_manifest(page)
-        amb_manifest = extract_ambience_manifest(page)
+    def on_frame():
+        with lock:
+            done[0] += 1
+            d = done[0]
+        if progress_cb:
+            progress_cb(d, total_frames)
 
-        # Detect and enforce 16:9 clip bounds
-        raw_bounds = detect_content_bounds(page)
-        vw, vh = map(int, resolution.split("x"))
-        clip = enforce_16_9(raw_bounds, vw, vh)
-        print(f"[render] raw_bounds={raw_bounds} clip={clip}", flush=True)
-
-        # Apply enhance filter if requested
-        if enhance:
-            page.evaluate("() => { document.documentElement.style.filter = 'saturate(1.18) contrast(1.12)'; }")
-
-        # Pause all animations and prepare for frame-by-frame seek
-        page.evaluate("""() => {
-            const s = document.createElement('style');
-            s.textContent = '*,*::before,*::after{animation-play-state:paused!important;animation-fill-mode:both!important}';
-            document.head.appendChild(s);
-            window.__a = document.getAnimations();
-        }""")
-
-        # Render each frame
-        for i in range(total_frames):
-            if cancel_event.is_set():
-                browser.close()
-                raise RenderError("CANCELLED")
-
-            t_ms = (i / fps) * 1000
-            seek_js = (
-                f"window.__a.forEach(a => a.currentTime = {t_ms}); "
-                f"if(window.__broll && window.__broll.seek) window.__broll.seek({t_ms}/1000); "
-                f"void document.body.offsetHeight"
-            )
-            page.evaluate(seek_js)
-
-            page.screenshot(
-                path=os.path.join(frames_dir, f"frame_{i:05d}.png"),
-                type="png",
-                clip={
-                    "x": clip["x"],
-                    "y": clip["y"],
-                    "width": clip.get("width", clip.get("w")),
-                    "height": clip.get("height", clip.get("h")),
-                }
-            )
-
-            if progress_cb:
-                progress_cb(i + 1, total_frames)
-
-        browser.close()
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = [ex.submit(_render_slice, html_path, width, height, enhance,
+                          clip, frames_dir, fps, sl, cancel_event, stop_event,
+                          on_frame) for sl in slices]
+        err = None
+        for f in as_completed(futs):
+            try:
+                f.result()
+            except Exception as e:
+                stop_event.set()
+                if err is None:
+                    err = e
+    if err is not None:
+        raise err if isinstance(err, RenderError) else RenderError(str(err))
 
     return {
         "sfx_events": sfx_manifest.get("events", []),
