@@ -1,7 +1,7 @@
 """bootstrap.py — Single-command Kaggle launcher.
 
-Paste ONE line into a Kaggle cell:
-    !git clone https://github.com/shivaww/Recorder.git /kaggle/working/R && cd /kaggle/working/R/kaggle && python bootstrap.py
+Paste ONE line into a Kaggle cell (safe to re-run; refreshes the clone):
+    !rm -rf /kaggle/working/R && git clone --depth 1 https://github.com/shivaww/Recorder.git /kaggle/working/R && cd /kaggle/working/R/kaggle && python bootstrap.py
 
 This script:
   1. Installs all dependencies (Playwright, FFmpeg, cloudflared, numpy)
