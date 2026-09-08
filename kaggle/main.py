@@ -186,10 +186,13 @@ def validate_job(job_id):
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
-        pass  # Suppress default logging
+        try:
+            print(f"[http] {format % args}", flush=True)
+        except Exception:
+            pass
 
     def _send_json(self, code, data):
-        body = json.dumps(data).encode()
+        body = json.dumps(data, default=str).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -254,7 +257,13 @@ class Handler(BaseHTTPRequestHandler):
 
             self._send_json(404, {"error": "Unknown route"})
         except Exception as e:
-            self._send_json(500, {"error": str(e)})
+            import traceback
+            print(f"[http-error] GET {self.path}: {type(e).__name__}: {e}", flush=True)
+            traceback.print_exc()
+            try:
+                self._send_json(500, {"error": str(e)})
+            except Exception:
+                pass
 
     def do_POST(self):
         try:
