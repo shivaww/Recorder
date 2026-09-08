@@ -21,7 +21,7 @@ class JobTelemetry:
         self.encoding_started_at = None
         self.done_at = None
         self.fps_actual = 0.0
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # reentrant: to_status_dict nests eta_seconds/progress_pct
 
     def mark_rendering(self):
         with self._lock:
