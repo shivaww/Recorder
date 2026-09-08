@@ -49,7 +49,11 @@ class RemoteApi(private val baseUrl: String, private val apiKey: String) {
 
     // Multipart and other verbs appended below...
 
+    var lastError: String? = null
+        private set
+
     fun submitJob(htmlFile: File, fps: Int, resolution: String, duration: Int, enhance: Boolean, onProgress: ((Int) -> Unit)? = null): String? {
+        lastError = null
         val boundary = "broll-boundary-${System.currentTimeMillis()}"
         val conn = connect("/jobs", "POST", 30000).apply {
             setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
@@ -90,13 +94,17 @@ class RemoteApi(private val baseUrl: String, private val apiKey: String) {
             out.write("--$boundary--\r\n".toByteArray())
             out.flush()
             
-            if (conn.responseCode !in 200..299) return null
+            if (conn.responseCode !in 200..299) {
+                lastError = "HTTP ${conn.responseCode}"
+                return null
+            }
             
             val resp = conn.inputStream.bufferedReader().readText()
             // Expects: {"job_id": "abc123"}
             val regex = Regex("\"job_id\"\\s*:\\s*\"([^\"]+)\"")
             return regex.find(resp)?.groupValues?.get(1)
         } catch (e: Exception) {
+            lastError = "${e.javaClass.simpleName}: ${e.message}"
             return null
         } finally {
             conn.disconnect()

@@ -675,13 +675,15 @@ class MainActivity : Activity() {
             setPadding(pad, pad, pad, pad)
             gravity = Gravity.CENTER_VERTICAL
         }
-        col.addView(monoTv("VALIDATION FAILED", 16, RED, true))
+        col.addView(monoTv(if (message.startsWith("render failed:")) "RENDER FAILED" else if (message.contains("submit")) "SUBMIT FAILED" else "VALIDATION FAILED", 16, RED, true))
         col.addView(spacer(dp(10)))
         col.addView(monoTv(message, 13, TXT))
         col.addView(spacer(dp(12)))
         col.addView(
             monoTv(
-                if (message.startsWith("render failed:")) renderHint else validationHint,
+                if (message.startsWith("render failed:")) renderHint
+                else if (message.contains("submit")) "submit failed: verify BASE URL + API KEY match the CURRENT Kaggle READY block (the tunnel URL changes on every restart), and that the tunnel cell is still alive."
+                else validationHint,
                 12,
                 TXT2
             )
@@ -1795,7 +1797,7 @@ class MainActivity : Activity() {
                     startRemotePolling()
                     showRemoteJobsScreen()
                 } else {
-                    showErrorScreen("Failed to submit jobs. Check connection/API key.")
+                    showErrorScreen("Failed to submit jobs: ${api.lastError ?: "unknown error"}")
                 }
             }
         }.start()
