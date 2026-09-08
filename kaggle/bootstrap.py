@@ -145,12 +145,12 @@ if __name__ == "__main__":
     url = wait_for_url(cf_proc, api_key)
 
     if url:
-        print("\n" + "#"*50)
-        print("#  READY — ENTER THESE IN THE ANDROID APP")
-        print("#"*50)
-        print(f"\n  API KEY:  {api_key}")
-        print(f"  BASE URL: {url}\n")
-        print("#"*50)
+        print("\n" + "="*60)
+        print("  READY — COPY THESE TWO VALUES INTO THE ANDROID APP")
+        print("="*60)
+        print(f"  API KEY  : {api_key}")
+        print(f"  BASE URL : {url}")
+        print("="*60)
         print("\n  Server is running. Keep this cell alive.")
         print("  Press Ctrl+C or stop the cell to shut down.\n")
 
