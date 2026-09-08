@@ -117,6 +117,12 @@ class MainActivity : Activity() {
     private val remoteJobs = mutableListOf<JobStore.JobMeta>()
     @Volatile private var remotePolling = false
     private var remotePollThread: Thread? = null
+    private val jobViews = mutableMapOf<String, Pair<ProgressBar, TextView>>()
+    private var gpuHeaderTv: TextView? = null
+    private val jobFailCount = mutableMapOf<String, Int>()
+    @Volatile private var lastGpu: List<RemoteApi.GpuInfo> = emptyList()
+    private var uploadBar: ProgressBar? = null
+    private var uploadTv: TextView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -1716,6 +1722,13 @@ class MainActivity : Activity() {
         )
 
         col.addView(spacer(dp(20)))
+        uploadBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100; progress = 0; visibility = android.view.View.GONE
+        }
+        col.addView(uploadBar)
+        uploadTv = monoTv("", 10, TXT2).apply { visibility = android.view.View.GONE }
+        col.addView(uploadTv)
+        col.addView(spacer(dp(8)))
         col.addView(mkButton("SUBMIT REMOTE JOBS", filled = true).apply {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52))
             setOnClickListener { startRemoteSubmit() }
@@ -1738,14 +1751,23 @@ class MainActivity : Activity() {
             return
         }
         
-        showBusy("Submitting jobs...")
+        runOnUiThread {
+            uploadBar?.visibility = android.view.View.VISIBLE
+            uploadTv?.visibility = android.view.View.VISIBLE
+            uploadTv?.text = "Uploading..."
+        }
         Thread {
             val api = RemoteApi(url, key)
             val resStr = "${resW}x${resH}"
             var successCount = 0
             
             blocks.forEach { block ->
-                val jobId = api.submitJob(block.file, fps, resStr, 10, batchEnhance) // duration mocked to 10s for now
+                val jobId = api.submitJob(block.file, fps, resStr, 10, batchEnhance) { pct ->
+                    runOnUiThread {
+                        uploadBar?.progress = pct
+                        uploadTv?.text = "Uploading ${block.name}: $pct%"
+                    }
+                }
                 if (jobId != null) {
                     val meta = JobStore.JobMeta(
                         jobId = jobId,
@@ -1764,6 +1786,8 @@ class MainActivity : Activity() {
             }
             
             runOnUiThread {
+                uploadBar?.visibility = android.view.View.GONE
+                uploadTv?.visibility = android.view.View.GONE
                 if (successCount > 0) {
                     blocks.clear()
                     blockDir().deleteRecursively()
@@ -1784,7 +1808,15 @@ class MainActivity : Activity() {
             setPadding(pad, pad, pad, pad)
         }
         col.addView(monoTv("REMOTE JOBS", 22, AMBER, true))
-        col.addView(spacer(dp(16)))
+        col.addView(spacer(dp(8)))
+        gpuHeaderTv = monoTv(gpuSummary(), 11, TXT2)
+        col.addView(gpuHeaderTv!!)
+        col.addView(spacer(dp(8)))
+        col.addView(mkButton("CLEAR FINISHED / STUCK").apply {
+            setOnClickListener { clearQueue() }
+        })
+        col.addView(spacer(dp(12)))
+        jobViews.clear()
 
         synchronized(remoteJobs) {
             if (remoteJobs.isEmpty()) {
@@ -1799,6 +1831,7 @@ class MainActivity : Activity() {
                     card.addView(monoTv(job.fileName, 13, TXT, true))
                     card.addView(monoTv("ID: ${job.jobId}", 10, TXT2))
                     card.addView(monoTv("State: ${job.state}", 12, AMBER))
+                    job.error?.let { card.addView(monoTv("ERR: $it", 10, 0xFFFF5252.toInt())) }
                     
                     if (job.state == "INVALID") {
                         card.addView(monoTv("Validation failed — check HTML", 11, TXT2))
@@ -1826,6 +1859,16 @@ class MainActivity : Activity() {
                     } else if (job.downloaded) {
                         card.addView(monoTv("Downloaded", 11, AMBER))
                     } else {
+                        if (job.state == "RENDERING" || job.state == "ENCODING") {
+                            val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                                max = 100
+                                progress = job.progress
+                            }
+                            val ptxt = monoTv("${job.progress}% · ETA ${if (job.etaSec >= 0) job.etaSec.toString() + "s" else "--"}", 10, TXT2)
+                            card.addView(bar)
+                            card.addView(ptxt)
+                            jobViews[job.jobId] = bar to ptxt
+                        }
                         card.addView(mkButton("CANCEL").apply {
                             setOnClickListener { cancelRemoteJob(idx) }
                         })
@@ -1839,6 +1882,19 @@ class MainActivity : Activity() {
         col.addView(spacer(dp(20)))
         col.addView(mkButton("BACK").apply { setOnClickListener { showPickScreen() } })
         showScreen(android.widget.ScrollView(this).apply { addView(col) })
+    }
+
+    private fun gpuSummary(): String {
+        if (lastGpu.isEmpty()) return "GPU: --"
+        return lastGpu.joinToString("   ") { g -> "GPU${g.id}: ${g.utilPct}% · ${g.memUsedMb}/${g.memTotalMb}MB · ${g.tempC}C" }
+    }
+
+    private fun clearQueue() {
+        synchronized(remoteJobs) {
+            remoteJobs.removeAll { it.state in listOf("DONE", "FAILED", "CANCELLED", "INVALID") }
+        }
+        jobStore.saveAll(remoteJobs)
+        showRemoteJobsScreen()
     }
 
     private fun startRemoteDownload(idx: Int, bar: ProgressBar, txt: TextView) {
@@ -1976,21 +2032,52 @@ class MainActivity : Activity() {
                     val key = securePrefs.apiKey
                     if (url.isNotEmpty() && key.isNotEmpty()) {
                         val api = RemoteApi(url, key)
+                        lastGpu = api.getGpuUsage()
                         var changed = false
                         val jobsCopy = synchronized(remoteJobs) { remoteJobs.toList() }
                         
                         for (job in jobsCopy) {
                             if (job.state == "DONE" || job.state == "FAILED" || job.state == "CANCELLED") continue
-                            val status = api.getStatus(job.jobId)
-                            if (status != null && status.state != job.state) {
+                            val (code, status) = api.getStatusDetailed(job.jobId)
+                            if (code == 404) {
                                 synchronized(remoteJobs) {
                                     val idx = remoteJobs.indexOfFirst { it.jobId == job.jobId }
-                                    if (idx >= 0) remoteJobs[idx].state = status.state
+                                    if (idx >= 0) { remoteJobs[idx].state = "FAILED"; remoteJobs[idx].error = "Job not on server (restart?)" }
                                 }
                                 changed = true
+                            } else if (code == -1) {
+                                val n = (jobFailCount[job.jobId] ?: 0) + 1
+                                jobFailCount[job.jobId] = n
+                                if (n >= 3) {
+                                    synchronized(remoteJobs) {
+                                        val idx = remoteJobs.indexOfFirst { it.jobId == job.jobId }
+                                        if (idx >= 0) { remoteJobs[idx].state = "FAILED"; remoteJobs[idx].error = "Server unreachable" }
+                                    }
+                                    changed = true
+                                }
+                            } else if (status != null) {
+                                jobFailCount[job.jobId] = 0
+                                val stateChanged = status.state != job.state
+                                synchronized(remoteJobs) {
+                                    val idx = remoteJobs.indexOfFirst { it.jobId == job.jobId }
+                                    if (idx >= 0) {
+                                        remoteJobs[idx].state = status.state
+                                        remoteJobs[idx].progress = status.pct
+                                        remoteJobs[idx].etaSec = status.etaSec
+                                        remoteJobs[idx].error = status.error ?: status.validationReason
+                                    }
+                                }
+                                runOnUiThread {
+                                    jobViews[job.jobId]?.let { (bar, txt) ->
+                                        bar.progress = status.pct
+                                        txt.text = "${status.pct}% · ${status.frame}/${status.totalFrames} · ETA ${if (status.etaSec >= 0) status.etaSec.toString() + "s" else "--"}"
+                                    }
+                                }
+                                if (stateChanged) changed = true
                             }
-                            Thread.sleep(2000) // 1-2s for RENDERING/ENCODING
+                            Thread.sleep(1500)
                         }
+                        runOnUiThread { gpuHeaderTv?.text = gpuSummary() }
                         if (changed) {
                             jobStore.saveAll(remoteJobs)
                             runOnUiThread { if (currentScreen is android.widget.ScrollView) showRemoteJobsScreen() }

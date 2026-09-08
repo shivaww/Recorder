@@ -145,6 +145,11 @@ if __name__ == "__main__":
     url = wait_for_url(cf_proc, api_key)
 
     if url:
+        try:
+            from IPython.display import clear_output
+            clear_output(wait=False)
+        except Exception:
+            pass
         print("\n" + "="*60)
         print("  READY — COPY THESE TWO VALUES INTO THE ANDROID APP")
         print("="*60)

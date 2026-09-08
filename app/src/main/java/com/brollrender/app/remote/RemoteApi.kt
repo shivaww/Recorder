@@ -49,7 +49,7 @@ class RemoteApi(private val baseUrl: String, private val apiKey: String) {
 
     // Multipart and other verbs appended below...
 
-    fun submitJob(htmlFile: File, fps: Int, resolution: String, duration: Int, enhance: Boolean): String? {
+    fun submitJob(htmlFile: File, fps: Int, resolution: String, duration: Int, enhance: Boolean, onProgress: ((Int) -> Unit)? = null): String? {
         val boundary = "broll-boundary-${System.currentTimeMillis()}"
         val conn = connect("/jobs", "POST", 30000).apply {
             setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
@@ -73,7 +73,18 @@ class RemoteApi(private val baseUrl: String, private val apiKey: String) {
             out.write("--$boundary\r\n".toByteArray())
             out.write("Content-Disposition: form-data; name=\"html\"; filename=\"${htmlFile.name}\"\r\n".toByteArray())
             out.write("Content-Type: text/html\r\n\r\n".toByteArray())
-            htmlFile.inputStream().use { it.copyTo(out) }
+            val totalBytes = htmlFile.length()
+            var sent = 0L
+            htmlFile.inputStream().use { input ->
+                val buf = ByteArray(8192)
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    out.write(buf, 0, n)
+                    sent += n
+                    if (totalBytes > 0) onProgress?.invoke((sent * 100 / totalBytes).toInt())
+                }
+            }
             out.write("\r\n".toByteArray())
             
             out.write("--$boundary--\r\n".toByteArray())
@@ -156,6 +167,52 @@ class RemoteApi(private val baseUrl: String, private val apiKey: String) {
             false
         } finally {
             conn.disconnect()
+        }
+    }
+
+    data class GpuInfo(val id: Int, val utilPct: Int, val memUsedMb: Int, val memTotalMb: Int, val tempC: Int)
+
+    fun getGpuUsage(): List<GpuInfo> {
+        val conn = connect("/gpu", "GET", 5000)
+        return try {
+            if (conn.responseCode !in 200..299) return emptyList()
+            val resp = conn.inputStream.bufferedReader().readText()
+            val list = mutableListOf<GpuInfo>()
+            Regex("\\{[^}]*\\}").findAll(resp).forEach { m ->
+                val s = m.value
+                fun num(key: String): Int = Regex("\"$key\"\\s*:\\s*(\\d+)").find(s)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                list.add(GpuInfo(num("id"), num("util_pct"), num("mem_used_mb"), num("mem_total_mb"), num("temp_c")))
+            }
+            list
+        } catch (e: Exception) {
+            emptyList()
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /** Returns (httpCode, status). 404 = job gone (server restarted); -1 = network error. */
+    fun getStatusDetailed(jobId: String): Pair<Int, JobStatus?> {
+        return try {
+            val conn = connect("/jobs/$jobId/status", "GET", 10000)
+            val code = conn.responseCode
+            if (code !in 200..299) {
+                conn.disconnect()
+                return code to null
+            }
+            val resp = conn.inputStream.bufferedReader().readText()
+            conn.disconnect()
+            val state = Regex("\"state\"\\s*:\\s*\"([^\"]+)\"").find(resp)?.groupValues?.get(1) ?: return code to null
+            val frame = Regex("\"frame\"\\s*:\\s*(\\d+)").find(resp)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val total = Regex("\"total_frames\"\\s*:\\s*(\\d+)").find(resp)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val pct = Regex("\"pct\"\\s*:\\s*(\\d+)").find(resp)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val eta = Regex("\"eta_sec\"\\s*:\\s*(-?\\d+)").find(resp)?.groupValues?.get(1)?.toIntOrNull() ?: -1
+            val rfps = Regex("\"render_fps\"\\s*:\\s*([\\d.]+)").find(resp)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
+            val error = Regex("\"error\"\\s*:\\s*\"([^\"]+)\"").find(resp)?.groupValues?.get(1)
+            val vReason = Regex("\"reason\"\\s*:\\s*\"([^\"]+)\"").find(resp)?.groupValues?.get(1)
+            code to JobStatus(state, frame, total, pct, eta, rfps, error, vReason)
+        } catch (e: Exception) {
+            -1 to null
         }
     }
 

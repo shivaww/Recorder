@@ -19,7 +19,10 @@ class JobStore(context: Context) {
         val duration: Int,
         val enhance: Boolean,
         var downloaded: Boolean = false,
-        var localUri: String? = null
+        var localUri: String? = null,
+        var progress: Int = 0,
+        var etaSec: Int = -1,
+        var error: String? = null
     )
 
     fun loadAll(): MutableList<JobMeta> {
@@ -40,7 +43,10 @@ class JobStore(context: Context) {
                         duration = o.getInt("duration"),
                         enhance = o.getBoolean("enhance"),
                         downloaded = o.optBoolean("downloaded", false),
-                        localUri = o.optString("localUri", null)
+                        localUri = o.optString("localUri", null),
+                        progress = o.optInt("progress", 0),
+                        etaSec = o.optInt("etaSec", -1),
+                        error = o.optString("error", null)
                     )
                 )
             }
@@ -64,6 +70,9 @@ class JobStore(context: Context) {
                 put("enhance", j.enhance)
                 put("downloaded", j.downloaded)
                 put("localUri", j.localUri)
+                put("progress", j.progress)
+                put("etaSec", j.etaSec)
+                j.error?.let { put("error", it) }
             })
         }
         prefs.edit().putString("jobs", arr.toString()).apply()
