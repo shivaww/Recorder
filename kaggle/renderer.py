@@ -8,7 +8,7 @@ import os
 import time
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
-from config import CHROMIUM_FLAGS
+from config import CHROMIUM_FLAGS, CPU_FALLBACK_FLAGS
 
 
 class RenderError(Exception):
@@ -52,23 +52,35 @@ def detect_content_bounds(page):
     return bounds
 
 
-def enforce_16_9(bounds):
-    """Snap bounds to exact 16:9 with integer pixels, centered."""
-    w = bounds["w"]
-    h = bounds["h"]
-    target_ratio = 16.0 / 9.0
-    current_ratio = w / h
+def enforce_16_9(bounds, vw=1920, vh=1080):
+    """Smallest 16:9 window that CONTAINS the bounds (expand, never crop),
+    centered on the bounds, clamped inside the viewport."""
+    target = 16.0 / 9.0
+    bx, by, bw, bh = (int(round(bounds[k])) for k in ("x", "y", "w", "h"))
 
-    if current_ratio > target_ratio:
-        new_w = int(h * target_ratio)
-        x_offset = int((w - new_w) / 2)
-        return {"x": int(bounds["x"]) + x_offset, "y": int(bounds["y"]),
-                "w": new_w, "h": int(h)}
-    else:
-        new_h = int(w / target_ratio)
-        y_offset = int((h - new_h) / 2)
-        return {"x": int(bounds["x"]), "y": int(bounds["y"]) + y_offset,
-                "w": int(w), "h": new_h}
+    # If the author frame essentially fills the viewport, capture it exactly
+    if bw >= vw * 0.98 and bh >= vh * 0.98:
+        return {"x": 0, "y": 0, "w": vw, "h": vh}
+
+    cx, cy = bx + bw / 2.0, by + bh / 2.0
+    w = float(bw)
+    h = w / target
+    if h < bh:          # too tall: widen so nothing is cut vertically
+        h = float(bh)
+        w = h * target
+    if w > vw:          # cap at viewport
+        w = float(vw)
+        h = w / target
+    if h > vh:
+        h = float(vh)
+        w = h * target
+    w = int(round(w))
+    h = int(round(h))
+    x = int(round(cx - w / 2.0))
+    y = int(round(cy - h / 2.0))
+    x = max(0, min(x, vw - w))
+    y = max(0, min(y, vh - h))
+    return {"x": x, "y": y, "w": w, "h": h}
 
 
 def extract_sfx_manifest(page):
@@ -125,7 +137,11 @@ def render_frames(html_path, frames_dir, fps, resolution, duration, enhance,
     total_frames = int(fps * duration)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(args=CHROMIUM_FLAGS)
+        try:
+            browser = p.chromium.launch(args=CHROMIUM_FLAGS)
+        except Exception as le:
+            print(f"[render] GPU launch failed ({le}); CPU fallback", flush=True)
+            browser = p.chromium.launch(args=CPU_FALLBACK_FLAGS)
         page = browser.new_page(
             viewport={"width": width, "height": height},
             device_scale_factor=1
@@ -165,7 +181,9 @@ def render_frames(html_path, frames_dir, fps, resolution, duration, enhance,
 
         # Detect and enforce 16:9 clip bounds
         raw_bounds = detect_content_bounds(page)
-        clip = enforce_16_9(raw_bounds)
+        vw, vh = map(int, resolution.split("x"))
+        clip = enforce_16_9(raw_bounds, vw, vh)
+        print(f"[render] raw_bounds={raw_bounds} clip={clip}", flush=True)
 
         # Apply enhance filter if requested
         if enhance:

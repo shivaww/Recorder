@@ -104,7 +104,7 @@ def process_job(job_id):
         html_path = job["html_path"]
         fps = job["fps"]
         resolution = job["resolution"]
-        duration = job["duration"]
+        duration = job.get("eff_duration") or job["duration"] or 10
         enhance = job["enhance"]
         cancel_event = job["cancel_event"]
         gpu_id = job["gpu"]
@@ -188,7 +188,8 @@ def validate_job(job_id):
 
     width, height = map(int, resolution.split("x"))
     result = validate_html(html_path, width, height)
-    print(f"[validate] job={job_id} valid={result['valid']} reason={result.get('reason')}", flush=True)
+    auto_dur = result.get("duration_s")
+    print(f"[validate] job={job_id} valid={result['valid']} reason={result.get('reason')} auto_duration={auto_dur}", flush=True)
 
     with JOBS_LOCK:
         if job_id not in JOBS:
@@ -196,7 +197,10 @@ def validate_job(job_id):
         if result["valid"]:
             JOBS[job_id]["state"] = STATE_WAITING_START
             JOBS[job_id]["validation"] = result
-            JOBS[job_id]["total_frames"] = JOBS[job_id]["fps"] * JOBS[job_id]["duration"]
+            JOBS[job_id]["auto_duration"] = auto_dur
+            eff = int(round(auto_dur)) if auto_dur else max(int(JOBS[job_id]["duration"]), 1)
+            JOBS[job_id]["eff_duration"] = eff
+            JOBS[job_id]["total_frames"] = JOBS[job_id]["fps"] * eff
         else:
             JOBS[job_id]["state"] = STATE_INVALID
             JOBS[job_id]["validation"] = result

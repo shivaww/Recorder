@@ -37,14 +37,21 @@ CHROMIUM_FLAGS = [
     "--font-render-hinting=none",
     "--disable-font-subpixel-positioning",
     "--disable-lcd-text",
-    "--disable-gpu",
-    "--disable-gpu-compositing",
-    "--disable-software-rasterizer",
+    "--enable-gpu",
+    "--use-angle=egl",
+    "--enable-gpu-rasterization",
+    "--enable-zero-copy",
+    "--ignore-gpu-blocklist",
     "--disable-skia-runtime-opts",
     "--disable-field-trial-config",
     "--disable-variations",
     "--disable-dev-shm-usage",
 ]
+
+# Safe CPU-only set if EGL/GPU launch fails
+CPU_FALLBACK_FLAGS = [f for f in CHROMIUM_FLAGS if f not in (
+    "--enable-gpu", "--use-angle=egl", "--enable-gpu-rasterization",
+    "--enable-zero-copy", "--ignore-gpu-blocklist")] + ["--disable-gpu"]
 
 # ─── JOB STATES ───────────────────────────────────────────────────────────────
 # UPLOADED -> VALIDATING -> VALID / INVALID

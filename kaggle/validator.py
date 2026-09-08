@@ -39,6 +39,7 @@ def validate_html(html_path, width=1920, height=1080, timeout_ms=10000):
         "has_ambience": False,
         "content_bounds": None,
         "fonts_loaded": False,
+        "duration_s": None,
         "warnings": []
     }
 
@@ -114,6 +115,29 @@ def validate_html(html_path, width=1920, height=1080, timeout_ms=10000):
 
             if not bounds:
                 result["warnings"].append("No content bounds detected — will use full viewport")
+
+            # Detect animation timeline duration (seconds) for auto-duration
+            try:
+                dur_s = page.evaluate("""() => {
+                    let maxEnd = 0;
+                    const anims = (document.getAnimations ? document.getAnimations() : []);
+                    for (const a of anims) {
+                        try {
+                            const ef = a.effect;
+                            if (!ef || !ef.getTiming) continue;
+                            const t = ef.getTiming();
+                            const dur = (typeof t.duration === 'number') ? t.duration : 0;
+                            const it = (typeof t.iterations === 'number' && isFinite(t.iterations)) ? t.iterations : 1;
+                            const end = (t.delay || 0) + dur * it;
+                            if (isFinite(end) && end > maxEnd) maxEnd = end;
+                        } catch (e) {}
+                    }
+                    return maxEnd / 1000;
+                }""")
+                if dur_s and dur_s > 0.5:
+                    result["duration_s"] = round(min(max(float(dur_s), 2.0), 600.0), 2)
+            except Exception:
+                pass
 
             result["valid"] = True
             browser.close()
