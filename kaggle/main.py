@@ -168,6 +168,10 @@ def process_job(job_id):
         print(f"[error] job={job_id} {type(e).__name__}: {e}", flush=True)
         telemetry.mark_failed(e)
         shutil.rmtree(frames_dir, ignore_errors=True)
+    finally:
+        with JOBS_LOCK:
+            if job_id in JOBS:
+                JOBS[job_id]["state"] = telemetry.state
 
 
 # ─── VALIDATION WORKER ────────────────────────────────────────────────────────
@@ -260,7 +264,7 @@ class Handler(BaseHTTPRequestHandler):
                 job_id = parts[2]
                 with JOBS_LOCK:
                     job = JOBS.get(job_id)
-                if not job or job["state"] != STATE_DONE or not os.path.exists(job.get("file_path", "")):
+                if not job or not os.path.exists(job.get("file_path", "")):
                     self._send_json(404, {"error": "Not ready"})
                     return
                 file_path = job["file_path"]
