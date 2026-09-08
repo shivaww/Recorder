@@ -138,10 +138,13 @@ def render_frames(html_path, frames_dir, fps, resolution, duration, enhance,
 
     with sync_playwright() as p:
         try:
-            browser = p.chromium.launch(args=CHROMIUM_FLAGS)
+            browser = p.chromium.launch(headless=True, args=CHROMIUM_FLAGS)
+            print("[render] Chromium launched with Vulkan/GPU flags", flush=True)
         except Exception as le:
-            print(f"[render] GPU launch failed ({le}); CPU fallback", flush=True)
-            browser = p.chromium.launch(args=CPU_FALLBACK_FLAGS)
+            import traceback
+            print("[render] GPU launch failed; falling back to CPU", flush=True)
+            traceback.print_exc()
+            browser = p.chromium.launch(headless=True, args=CPU_FALLBACK_FLAGS)
         page = browser.new_page(
             viewport={"width": width, "height": height},
             device_scale_factor=1

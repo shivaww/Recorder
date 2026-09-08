@@ -76,6 +76,25 @@ def install_deps():
     else:
         print("  -> WARNING: h264_nvenc not found, will use libx264 fallback")
 
+    print("  -> installing Vulkan + NVIDIA GL libs (needed for GPU Chromium)...", flush=True)
+    run_live(["apt-get", "update", "-qq"])
+    drv = ""
+    rv = subprocess.run(["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
+                        capture_output=True, text=True)
+    if rv.returncode == 0 and rv.stdout.strip():
+        drv = rv.stdout.strip().splitlines()[0].split(".")[0]
+    pkgs = ["vulkan-tools"] + ([f"libnvidia-gl-{drv}"] if drv else [])
+    try:
+        run_live(["apt-get", "install", "-y"] + pkgs)
+    except subprocess.CalledProcessError:
+        print(f"  -> libnvidia-gl-{drv} unavailable; installing vulkan-tools only", flush=True)
+        run_live(["apt-get", "install", "-y", "vulkan-tools"])
+    vi = subprocess.run(["vulkaninfo", "--summary"], capture_output=True, text=True)
+    if "NVIDIA" in (vi.stdout or ""):
+        print("  -> Vulkan: NVIDIA device visible")
+    else:
+        print("  -> WARNING: vulkaninfo shows no NVIDIA device; Chromium will fall back to CPU")
+
     print("  Dependencies installed.")
 
 

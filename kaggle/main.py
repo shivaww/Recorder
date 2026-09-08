@@ -225,6 +225,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _check_key(self):
         if not validate_key(self.headers.get("X-API-Key")):
+            print(f"[auth] 403 {self.command} {self.path}: X-API-Key missing or mismatched", flush=True)
             self._send_json(403, {"error": "Forbidden"})
             return False
         return True

@@ -31,27 +31,43 @@ NUM_GPUS = detect_gpus()
 # Eliminates sub-pixel variance, font hinting diffs, GPU compositing artifacts
 CHROMIUM_FLAGS = [
     "--no-sandbox",
+    "--disable-dev-shm-usage",
+    "--headless=new",
+    "--use-angle=vulkan",
+    "--enable-features=Vulkan",
+    "--disable-vulkan-surface",
+    "--enable-unsafe-webgpu",
+    "--ignore-gpu-blocklist",
+    "--enable-gpu-rasterization",
+    "--enable-zero-copy",
+    "--disable-gpu-sandbox",
     "--hide-scrollbars",
     "--force-device-scale-factor=1",
     "--force-color-profile=srgb",
     "--font-render-hinting=none",
     "--disable-font-subpixel-positioning",
     "--disable-lcd-text",
-    "--enable-gpu",
-    "--use-angle=egl",
-    "--enable-gpu-rasterization",
-    "--enable-zero-copy",
-    "--ignore-gpu-blocklist",
     "--disable-skia-runtime-opts",
     "--disable-field-trial-config",
     "--disable-variations",
-    "--disable-dev-shm-usage",
 ]
 
 # Safe CPU-only set if EGL/GPU launch fails
-CPU_FALLBACK_FLAGS = [f for f in CHROMIUM_FLAGS if f not in (
-    "--enable-gpu", "--use-angle=egl", "--enable-gpu-rasterization",
-    "--enable-zero-copy", "--ignore-gpu-blocklist")] + ["--disable-gpu"]
+CPU_FALLBACK_FLAGS = [
+    "--no-sandbox",
+    "--disable-dev-shm-usage",
+    "--headless=new",
+    "--disable-gpu",
+    "--hide-scrollbars",
+    "--force-device-scale-factor=1",
+    "--force-color-profile=srgb",
+    "--font-render-hinting=none",
+    "--disable-font-subpixel-positioning",
+    "--disable-lcd-text",
+    "--disable-skia-runtime-opts",
+    "--disable-field-trial-config",
+    "--disable-variations",
+]
 
 # ─── JOB STATES ───────────────────────────────────────────────────────────────
 # UPLOADED -> VALIDATING -> VALID / INVALID
