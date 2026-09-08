@@ -4,7 +4,7 @@ import subprocess
 
 # ─── SERVER ───────────────────────────────────────────────────────────────────
 PORT = 8000
-WORK_DIR = "/kaggle/working/broll_jobs"
+WORK_DIR = "/tmp/broll_jobs"
 os.makedirs(WORK_DIR, exist_ok=True)
 
 # ─── AUDIO ────────────────────────────────────────────────────────────────────

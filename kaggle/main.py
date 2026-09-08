@@ -149,6 +149,7 @@ def process_job(job_id):
         telemetry.mark_failed(e)
         shutil.rmtree(frames_dir, ignore_errors=True)
     except Exception as e:
+        print(f"[error] job={job_id} {type(e).__name__}: {e}", flush=True)
         telemetry.mark_failed(e)
         shutil.rmtree(frames_dir, ignore_errors=True)
 
@@ -167,6 +168,7 @@ def validate_job(job_id):
 
     width, height = map(int, resolution.split("x"))
     result = validate_html(html_path, width, height)
+    print(f"[validate] job={job_id} valid={result['valid']} reason={result.get('reason')}", flush=True)
 
     with JOBS_LOCK:
         if job_id not in JOBS:
@@ -315,6 +317,7 @@ class Handler(BaseHTTPRequestHandler):
 
                 # Validate in background
                 threading.Thread(target=validate_job, args=(job_id,), daemon=True).start()
+                print(f"[recv] job={job_id} html={html_file['filename']} bytes={len(html_file['data'])}", flush=True)
                 self._send_json(200, {"job_id": job_id})
                 return
 

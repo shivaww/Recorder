@@ -15,6 +15,7 @@ import sys
 import os
 import time
 import shutil
+import threading
 
 WORK = "/kaggle/working"
 REPO_DIR = os.path.join(WORK, "R", "kaggle")
@@ -95,19 +96,27 @@ def run_preflight_checks():
     return api_key, PORT
 
 
+def _stream(proc, prefix):
+    def reader():
+        for line in proc.stdout:
+            print(prefix + line.rstrip(), flush=True)
+    threading.Thread(target=reader, daemon=True).start()
+
+
 def start_server():
     step("STEP 3/5: Starting BrollRender server")
     proc = subprocess.Popen(
-        [sys.executable, "main.py"],
+        [sys.executable, "-u", "main.py"],
         cwd=REPO_DIR,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        text=True
+        text=True,
+        bufsize=1
     )
+    _stream(proc, "   [server] ")
     time.sleep(3)
     if proc.poll() is not None:
-        out = proc.stdout.read()
-        print(f"  Server crashed:\n{out}")
+        print("  Server crashed (see [server] logs above).")
         sys.exit(1)
     print("  Server running.")
     return proc
@@ -136,6 +145,7 @@ def wait_for_url(cf_proc, api_key):
                 return None
             continue
 
+        print("   [tunnel] " + line.rstrip(), flush=True)
         if "trycloudflare.com" in line:
             for tok in line.split():
                 if tok.startswith("https://"):
