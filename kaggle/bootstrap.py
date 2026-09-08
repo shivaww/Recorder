@@ -36,6 +36,15 @@ def run_live(cmd, **kwargs):
         raise subprocess.CalledProcessError(proc.returncode, cmd)
 
 
+def free_port(port):
+    """Kill any previous server/tunnel still occupying the port."""
+    print(f"  -> freeing port {port} (killing old server/tunnel)...", flush=True)
+    subprocess.run(["fuser", "-k", f"{port}/tcp"], capture_output=True)
+    subprocess.run(["pkill", "-f", "cloudflared"], capture_output=True)
+    subprocess.run(["pkill", "-f", "main.py"], capture_output=True)
+    time.sleep(2)
+
+
 def install_deps():
     step("STEP 1/5: Installing dependencies")
 
@@ -138,6 +147,7 @@ if __name__ == "__main__":
     print("#  BROLLRENDER KAGGLE BOOTSTRAP")
     print("#"*50)
 
+    free_port(8000)
     install_deps()
     api_key, port = run_preflight_checks()
     server_proc = start_server()
