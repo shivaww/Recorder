@@ -115,6 +115,9 @@ def extract_ambience_manifest(page):
 
 
 WORKER_COUNT = max(1, min(4, os.cpu_count() or 2))
+# Global cap on concurrent frame captures across ALL jobs, so two queued
+# jobs cannot oversubscribe the cores with 2x workers.
+_WORK_SEM = threading.Semaphore(WORKER_COUNT)
 
 
 def _launch_browser(p):
@@ -199,21 +202,27 @@ def _render_slice(html_path, width, height, enhance, clip, frames_dir, fps,
                 if cancel_event.is_set() or stop_event.is_set():
                     raise RenderError("CANCELLED")
                 t_ms = (i / fps) * 1000
-                page.evaluate(
-                    f"window.__a.forEach(a => a.currentTime = {t_ms}); "
-                    f"if(window.__broll && window.__broll.seek) window.__broll.seek({t_ms}/1000); "
-                    f"void document.body.offsetHeight"
-                )
-                page.screenshot(
-                    path=os.path.join(frames_dir, f"frame_{i:05d}.png"),
-                    type="png",
-                    clip={
-                        "x": clip["x"],
-                        "y": clip["y"],
-                        "width": clip.get("width", clip.get("w")),
-                        "height": clip.get("height", clip.get("h")),
-                    }
-                )
+                while not _WORK_SEM.acquire(timeout=0.5):
+                    if cancel_event.is_set() or stop_event.is_set():
+                        raise RenderError("CANCELLED")
+                try:
+                    page.evaluate(
+                        f"window.__a.forEach(a => a.currentTime = {t_ms}); "
+                        f"if(window.__broll && window.__broll.seek) window.__broll.seek({t_ms}/1000); "
+                        f"void document.body.offsetHeight"
+                    )
+                    page.screenshot(
+                        path=os.path.join(frames_dir, f"frame_{i:05d}.png"),
+                        type="png",
+                        clip={
+                            "x": clip["x"],
+                            "y": clip["y"],
+                            "width": clip.get("width", clip.get("w")),
+                            "height": clip.get("height", clip.get("h")),
+                        }
+                    )
+                finally:
+                    _WORK_SEM.release()
                 on_frame()
             dt = max(time.time() - t0, 1e-6)
             print(f"[render] worker: {len(frame_ids)} frames in {dt:.1f}s "
