@@ -196,7 +196,12 @@ def render_frames(html_path, frames_dir, fps, resolution, duration, enhance,
             page.screenshot(
                 path=os.path.join(frames_dir, f"frame_{i:05d}.png"),
                 type="png",
-                clip=clip
+                clip={
+                    "x": clip["x"],
+                    "y": clip["y"],
+                    "width": clip.get("width", clip.get("w")),
+                    "height": clip.get("height", clip.get("h")),
+                }
             )
 
             if progress_cb:
