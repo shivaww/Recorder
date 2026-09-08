@@ -206,6 +206,7 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def do_GET(self):
+        print(f"[http-in] GET {self.path}", flush=True)
         try:
             path = urlparse(self.path).path
 
