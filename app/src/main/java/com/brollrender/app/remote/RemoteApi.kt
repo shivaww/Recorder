@@ -44,7 +44,7 @@ class RemoteApi(private val baseUrl: String, private val apiKey: String) {
             val code = conn.responseCode
             conn.disconnect()
             if (code !in 200..299) lastError = "HTTP $code"
-            code in 200..299 to (System.currentTimeMillis() - start)
+            (code in 200..299) to (System.currentTimeMillis() - start)
         } catch (e: Exception) {
             lastError = "${e.javaClass.simpleName}: ${e.message}"
             false to -1L
