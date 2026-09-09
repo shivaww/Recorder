@@ -151,16 +151,55 @@ def _prep_page(browser, html_path, width, height, enhance):
         }""")
     except PWTimeout:
         pass
+    # Preload CSS background-image URLs so they get the same explicit
+    # decode wait as <img> tags (networkidle alone can race slow CDNs).
+    page.evaluate("""() => {
+        window.__bgImgs = {};
+        const urls = new Set();
+        for (const el of document.querySelectorAll('*')) {
+            const bg = getComputedStyle(el).backgroundImage || '';
+            for (const part of bg.split('url(').slice(1)) {
+                const q = part[0];
+                const quoted = (q === '"' || q === "'");
+                const end = quoted ? part.indexOf(q, 1) : part.indexOf(')');
+                if (end > 0) urls.add(part.slice(quoted ? 1 : 0, end));
+            }
+        }
+        window.__bgUrls = [...urls];
+        for (const u of window.__bgUrls) {
+            const im = new Image();
+            im.src = u;
+            window.__bgImgs[u] = im;
+        }
+    }""")
     try:
         page.wait_for_function("""() => {
-            const imgs = document.querySelectorAll('img');
-            if (imgs.length === 0) return true;
-            for (const img of imgs) {
+            for (const img of document.querySelectorAll('img')) {
                 if (!img.complete || img.naturalWidth === 0) return false;
+            }
+            for (const u of (window.__bgUrls || [])) {
+                const im = window.__bgImgs[u];
+                if (!im || !im.complete || im.naturalWidth === 0) return false;
             }
             return true;
         }""", timeout=15000)
     except PWTimeout:
+        pass
+    try:
+        broken = page.evaluate("""() => {
+            const bad = [];
+            for (const img of document.querySelectorAll('img')) {
+                if (!img.complete || img.naturalWidth === 0) bad.push(img.src.slice(0, 80));
+            }
+            for (const u of (window.__bgUrls || [])) {
+                const im = window.__bgImgs[u];
+                if (!im || !im.complete || im.naturalWidth === 0) bad.push(('bg:' + u).slice(0, 80));
+            }
+            return bad;
+        }""")
+        if broken:
+            print(f"[render] WARNING: {len(broken)} image(s) failed to load: {broken[:5]}", flush=True)
+    except Exception:
         pass
     page.evaluate("""() => {
         const s = document.createElement('style');
