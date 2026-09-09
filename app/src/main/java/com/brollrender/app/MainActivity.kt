@@ -389,7 +389,7 @@ class MainActivity : Activity() {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                background = Console.panelBg(this)
+                background = Console.panelBg(context)
                 setPadding(dp(12), dp(8), dp(8), dp(8))
             }
             row.addView(
@@ -720,7 +720,7 @@ class MainActivity : Activity() {
         col.addView(spacer(dp(12)))
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            background = Console.panelBg(this)
+            background = Console.panelBg(context)
         }
         card.addView(View(this).apply {
             layoutParams = LinearLayout.LayoutParams(dp(3), ViewGroup.LayoutParams.MATCH_PARENT)
@@ -1132,7 +1132,7 @@ class MainActivity : Activity() {
         // % (when the SoC exposes it), and which pipeline is live.
         val statsCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = Console.panelBg(this)
+            background = Console.panelBg(context)
             setPadding(dp(12), dp(10), dp(12), dp(10))
         }
         renderStats = monoTv("MEM -- MB · measuring...", 11, TXT2)
@@ -1524,7 +1524,7 @@ class MainActivity : Activity() {
         val verified = vw == resW && vh == resH
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            background = Console.panelBg(this)
+            background = Console.panelBg(context)
         }
         card.addView(View(this).apply {
             layoutParams = LinearLayout.LayoutParams(dp(3), ViewGroup.LayoutParams.MATCH_PARENT)
@@ -1603,7 +1603,7 @@ class MainActivity : Activity() {
         val bootstrapCmd = "!rm -rf /kaggle/working/R && git clone --depth 1 https://github.com/shivaww/Recorder.git /kaggle/working/R && cd /kaggle/working/R/kaggle && python -u bootstrap.py"
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = Console.panelBg(this)
+            background = Console.panelBg(context)
             setPadding(dp(14), dp(12), dp(14), dp(14))
         }
         card.addView(displayTv("Bootstrap command", 12, TXT))
@@ -1657,7 +1657,7 @@ class MainActivity : Activity() {
             setHintTextColor(TXT2)
             textSize = 12f
             typeface = Console.data()
-            background = Console.panelBg(this)
+            background = Console.panelBg(context)
             setPadding(dp(12), dp(10), dp(12), dp(10))
         }
 
@@ -1674,7 +1674,7 @@ class MainActivity : Activity() {
 
         val connCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = Console.panelBg(this)
+            background = Console.panelBg(context)
             setPadding(dp(14), dp(12), dp(14), dp(14))
         }
         connCard.addView(displayTv("Connection", 13, TXT))
@@ -1745,7 +1745,7 @@ class MainActivity : Activity() {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                background = Console.panelBg(this)
+                background = Console.panelBg(context)
                 setPadding(dp(12), dp(8), dp(8), dp(8))
             }
             row.addView(monoTv("B${i + 1}  ${b.name}", 12, TXT).apply {
@@ -1977,7 +1977,7 @@ class MainActivity : Activity() {
         }
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            background = Console.panelBg(this)
+            background = Console.panelBg(context)
         }
         card.addView(View(this).apply {
             layoutParams = LinearLayout.LayoutParams(dp(3), ViewGroup.LayoutParams.MATCH_PARENT)
