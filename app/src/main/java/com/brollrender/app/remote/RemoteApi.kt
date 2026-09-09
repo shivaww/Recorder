@@ -34,15 +34,19 @@ class RemoteApi(private val baseUrl: String, private val apiKey: String) {
         return conn
     }
 
-    /** Returns (Reachable, LatencyMs) */
+    /** Returns (ReachableAndKeyAccepted, LatencyMs). Probes an authenticated
+     *  route so a rejected key reads as failure, never as success. */
     fun testConnection(): Pair<Boolean, Long> {
+        lastError = null
         val start = System.currentTimeMillis()
         return try {
-            val conn = connect("/health", "GET", 5000)
-            val ok = conn.responseCode in 200..299
+            val conn = connect("/gpu", "GET", 5000)
+            val code = conn.responseCode
             conn.disconnect()
-            ok to (System.currentTimeMillis() - start)
+            if (code !in 200..299) lastError = "HTTP $code"
+            code in 200..299 to (System.currentTimeMillis() - start)
         } catch (e: Exception) {
+            lastError = "${e.javaClass.simpleName}: ${e.message}"
             false to -1L
         }
     }

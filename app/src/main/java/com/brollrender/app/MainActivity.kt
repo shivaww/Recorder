@@ -269,10 +269,13 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
         }
-        col.addView(monoTv("BROLLRENDER", 26, AMBER, true))
-        col.addView(monoTv("HTML -> exact 16:9 MP4 / offscreen render", 12, TXT2))
-        col.addView(spacer(dp(28)))
-        col.addView(mkButton("CHOOSE HTML", filled = true).apply {
+        col.addView(displayTv("Brollrender", 28, AMBER))
+        col.addView(spacer(dp(4)))
+        col.addView(bodyTv(
+            "Turn HTML motion clips into exact 16:9 MP4s — rendered on this phone or on the Kaggle farm.",
+            13, TXT2))
+        col.addView(spacer(dp(24)))
+        col.addView(mkButton("Choose HTML file", filled = true).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 dp(52)
@@ -283,7 +286,7 @@ class MainActivity : Activity() {
             }
         })
         col.addView(spacer(dp(8)))
-        col.addView(mkButton("PASTE HTML").apply {
+        col.addView(mkButton("Paste HTML code").apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 dp(48)
@@ -291,13 +294,15 @@ class MainActivity : Activity() {
             setOnClickListener { pasteHtml() }
         })
         if (htmlFile != null) {
-            col.addView(spacer(dp(12)))
-            col.addView(monoTv("last: $htmlName", 12, TXT2))
+            col.addView(spacer(dp(10)))
+            col.addView(monoTv("last: $htmlName", 11, TXT2))
         }
-        col.addView(spacer(dp(16)))
+        col.addView(spacer(dp(20)))
         // Overnight batch is a SEPARATE feature: its own queue screen, never
         // in the way of the normal PICK -> PREVIEW -> RENDER -> DONE flow.
-        col.addView(mkButton("OVERNIGHT QUEUE").apply {
+        col.addView(displayTv("Render paths", 13, TXT))
+        col.addView(spacer(dp(8)))
+        col.addView(mkButton("Overnight queue on phone").apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 dp(48)
@@ -305,14 +310,14 @@ class MainActivity : Activity() {
             setOnClickListener { showQueueScreen() }
         })
         col.addView(spacer(dp(8)))
-        col.addView(mkButton("RENDER VIA KAGGLE").apply {
+        col.addView(mkButton("Render via Kaggle farm").apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 dp(48)
             )
             setOnClickListener { showKaggleSetupScreen() }
         })
-        col.addView(spacer(dp(34)))
+        col.addView(spacer(dp(28)))
 
         val resRow = toggleRow(
             col, "RESOLUTION",
@@ -367,21 +372,25 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
         }
-        col.addView(monoTv("OVERNIGHT QUEUE", 22, AMBER, true))
-        col.addView(monoTv("blocks render one at a time · screen off", 12, TXT2))
+        col.addView(displayTv("Overnight queue", 24, AMBER))
+        col.addView(spacer(dp(4)))
+        col.addView(bodyTv(
+            "Blocks render one at a time on this phone, screen off, while you sleep.",
+            13, TXT2))
         col.addView(spacer(dp(16)))
 
         // ---- queue: add block 1, then + the next, until N ----
-        col.addView(
-            monoTv(
-                "QUEUE · ${blocks.size} BLOCK" + if (blocks.size == 1) "" else "S",
-                11, TXT2
-            )
-        )
+        col.addView(displayTv("Queue · ${blocks.size} block" + if (blocks.size == 1) "" else "s", 13, TXT))
+        col.addView(spacer(dp(8)))
+        if (blocks.isEmpty()) {
+            col.addView(bodyTv("Nothing queued yet. Add blocks and start the batch before bed.", 12, TXT2))
+        }
         blocks.forEachIndexed { i, b ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
+                background = Console.panelBg(this)
+                setPadding(dp(12), dp(8), dp(8), dp(8))
             }
             row.addView(
                 monoTv("B${i + 1}  ${b.name}", 12, TXT).apply {
@@ -391,21 +400,26 @@ class MainActivity : Activity() {
                 }
             )
             row.addView(
-                mkButton("X").apply {
+                mkButton("Remove", danger = true).apply {
                     setOnClickListener {
                         if (!batchRunning) {
                             blocks.removeAt(i)
                             showQueueScreen()
                         }
                     }
-                    layoutParams = LinearLayout.LayoutParams(dp(44), dp(36))
                 }
             )
-            col.addView(row)
-            col.addView(spacer(dp(4)))
+            col.addView(
+                row,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+            col.addView(spacer(dp(6)))
         }
-        col.addView(spacer(dp(8)))
-        col.addView(mkButton("+ ADD BLOCK (FILE)", filled = true).apply {
+        col.addView(spacer(dp(6)))
+        col.addView(mkButton("Add block from file", filled = true).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(48)
             )
@@ -415,15 +429,15 @@ class MainActivity : Activity() {
             }
         })
         col.addView(spacer(dp(8)))
-        col.addView(mkButton("+ PASTE BLOCK").apply {
+        col.addView(mkButton("Paste block code").apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(44)
             )
             setOnClickListener { pasteBlock() }
         })
         if (blocks.isNotEmpty()) {
-            col.addView(spacer(dp(4)))
-            col.addView(mkButton("CLEAR QUEUE").apply {
+            col.addView(spacer(dp(8)))
+            col.addView(mkButton("Clear queue", danger = true).apply {
                 setOnClickListener {
                     if (!batchRunning) {
                         blocks.clear()
@@ -526,7 +540,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        box.addView(monoTv(label, 11, TXT2).apply {
+        box.addView(displayTv(label, 12, TXT2).apply {
             layoutParams = LinearLayout.LayoutParams(dp(112), ViewGroup.LayoutParams.WRAP_CONTENT)
         })
         for (b in row.buttons) {
@@ -547,9 +561,11 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
         }
         // Transparent: keep the ghost WebView's on-screen composite alive.
-        col.addView(monoTv(message, 14, AMBER))
-        col.addView(spacer(dp(12)))
-        col.addView(ProgressBar(this))
+        col.addView(bodyTv(message, 13, TXT2))
+        col.addView(spacer(dp(14)))
+        col.addView(ProgressBar(this).apply {
+            indeterminateTintList = android.content.res.ColorStateList.valueOf(AMBER)
+        })
         showScreen(col)
     }
 
@@ -691,26 +707,47 @@ class MainActivity : Activity() {
                 "CSS keyframe animations, and webfonts that load"
         val renderHint =
             "renderer timeout: retry the render. This is not an HTML validation error."
+        val isSubmit = message.contains("submit")
+        val isRender = message.startsWith("render failed:")
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
             gravity = Gravity.CENTER_VERTICAL
         }
-        col.addView(monoTv(if (message.startsWith("render failed:")) "RENDER FAILED" else if (message.contains("submit")) "SUBMIT FAILED" else "VALIDATION FAILED", 16, RED, true))
-        col.addView(spacer(dp(10)))
-        col.addView(monoTv(message, 13, TXT))
+        col.addView(displayTv(
+            if (isRender) "Render failed" else if (isSubmit) "Submit failed" else "Validation failed",
+            22, RED))
         col.addView(spacer(dp(12)))
-        col.addView(
-            monoTv(
-                if (message.startsWith("render failed:")) renderHint
-                else if (message.contains("submit")) "submit failed: verify BASE URL + API KEY match the CURRENT Kaggle READY block (the tunnel URL changes on every restart), and that the tunnel cell is still alive."
-                else validationHint,
-                12,
-                TXT2
-            )
-        )
-        col.addView(spacer(dp(24)))
-        col.addView(mkButton("BACK").apply { setOnClickListener { showPickScreen() } })
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            background = Console.panelBg(this)
+        }
+        card.addView(View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(3), ViewGroup.LayoutParams.MATCH_PARENT)
+            setBackgroundColor(RED)
+        })
+        val inner = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(14))
+        }
+        card.addView(inner, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        inner.addView(bodyTv(message, 13, TXT))
+        inner.addView(spacer(dp(8)))
+        inner.addView(bodyTv(
+            if (isRender) renderHint
+            else if (isSubmit) "Verify the BASE URL and API KEY match the CURRENT Kaggle READY block (the tunnel URL changes on every restart), and that the tunnel cell is still alive."
+            else validationHint,
+            12, TXT2))
+        col.addView(card, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        col.addView(spacer(dp(20)))
+        if (isSubmit) {
+            col.addView(mkButton("Open connection settings", filled = true).apply {
+                setOnClickListener { showRemoteQueueScreen() }
+            })
+            col.addView(spacer(dp(8)))
+        }
+        col.addView(mkButton("Back to menu").apply { setOnClickListener { showPickScreen() } })
         showScreen(col)
     }
 
@@ -1074,10 +1111,11 @@ class MainActivity : Activity() {
         // path reads the composited frame. An opaque screen would let the
         // RenderThread cull it. The e2e gate now decides GPU vs CPU; this
         // screen must not influence that decision.
-        col.addView(monoTv(title, 16, AMBER, true))
-        col.addView(monoTv("${resW}x${resH} @ ${fps}fps · ${durationSec}s", 12, TXT2))
-        col.addView(spacer(dp(14)))
-        renderBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+        col.addView(displayTv(title, 22, AMBER))
+        col.addView(spacer(dp(4)))
+        col.addView(monoTv("${resW}x${resH} @ ${fps}fps · ${durationSec}s", 11, TXT2))
+        col.addView(spacer(dp(16)))
+        renderBar = Console.rail(this).apply {
             isIndeterminate = false
             max = durationSec * fps
             progress = 0
@@ -1089,13 +1127,20 @@ class MainActivity : Activity() {
         col.addView(spacer(dp(8)))
         renderStatus = monoTv("frame 0/${durationSec * fps}", 12, TXT2)
         col.addView(renderStatus)
-        col.addView(spacer(dp(4)))
+        col.addView(spacer(dp(10)))
         // Realtime pipeline readout (~1 Hz from the engine): RAM, GPU busy
         // % (when the SoC exposes it), and which pipeline is live.
+        val statsCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = Console.panelBg(this)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
         renderStats = monoTv("MEM -- MB · measuring...", 11, TXT2)
-        col.addView(renderStats)
+        statsCard.addView(renderStats)
+        col.addView(statsCard, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         col.addView(spacer(dp(24)))
-        col.addView(mkButton("CANCEL").apply {
+        col.addView(mkButton("Cancel render", danger = true).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(48)
             )
@@ -1473,36 +1518,40 @@ class MainActivity : Activity() {
             setPadding(pad, pad, pad, pad)
             gravity = Gravity.CENTER_VERTICAL
         }
-        col.addView(monoTv("RENDER COMPLETE", 18, AMBER, true))
-        col.addView(spacer(dp(12)))
+        col.addView(displayTv("Render complete", 24, TEAL))
+        col.addView(spacer(dp(14)))
 
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(STROKE)
-            setPadding(dp(14), dp(14), dp(14), dp(14))
-        }
-        card.addView(monoTv("FILE", 10, TXT2))
-        card.addView(monoTv(queryName(uri), 13, TXT, true))
-        card.addView(spacer(dp(8)))
-        card.addView(monoTv("size      ${fmtSize(size)}", 12, TXT2))
-        card.addView(
-            monoTv(
-                "duration  ${String.format(Locale.US, "%.1f", durMs / 1000.0)} s",
-                12, TXT2
-            )
-        )
-        card.addView(monoTv("video     ${vw}x${vh}", 12, TXT2))
-        card.addView(monoTv("frame0.png saved for QC (Pictures/BrollRender)", 11, TXT2))
         val verified = vw == resW && vh == resH
-        card.addView(spacer(dp(8)))
-        card.addView(
-            if (verified) monoTv("VERIFIED ${vw}x${vh} - pixel-exact", 12, AMBER, true)
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            background = Console.panelBg(this)
+        }
+        card.addView(View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(3), ViewGroup.LayoutParams.MATCH_PARENT)
+            setBackgroundColor(if (verified) TEAL else RED)
+        })
+        val inner = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(14))
+        }
+        card.addView(inner, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        inner.addView(displayTv("File", 11, TXT2))
+        inner.addView(monoTv(queryName(uri), 13, TXT, true))
+        inner.addView(spacer(dp(8)))
+        inner.addView(monoTv("size      ${fmtSize(size)}", 12, TXT2))
+        inner.addView(monoTv("duration  ${String.format(Locale.US, "%.1f", durMs / 1000.0)} s", 12, TXT2))
+        inner.addView(monoTv("video     ${vw}x${vh}", 12, TXT2))
+        inner.addView(monoTv("frame0.png saved for QC (Pictures/BrollRender)", 11, TXT2))
+        inner.addView(spacer(dp(8)))
+        inner.addView(
+            if (verified) monoTv("VERIFIED ${vw}x${vh} - pixel-exact", 12, TEAL, true)
             else monoTv("MISMATCH: expected ${resW}x${resH}, got ${vw}x${vh}", 12, RED, true)
         )
-        col.addView(card)
+        col.addView(card, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         col.addView(spacer(dp(20)))
 
-        col.addView(mkButton("OPEN", filled = true).apply {
+        col.addView(mkButton("Open video", filled = true).apply {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48))
             setOnClickListener {
                 try {
@@ -1515,7 +1564,7 @@ class MainActivity : Activity() {
             }
         })
         col.addView(spacer(dp(8)))
-        col.addView(mkButton("SHARE").apply {
+        col.addView(mkButton("Share video").apply {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48))
             setOnClickListener {
                 val i = Intent(Intent.ACTION_SEND)
@@ -1526,7 +1575,7 @@ class MainActivity : Activity() {
             }
         })
         col.addView(spacer(dp(8)))
-        col.addView(mkButton("RENDER ANOTHER").apply {
+        col.addView(mkButton("Render another").apply {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48))
             setOnClickListener { showPickScreen() }
         })
@@ -1542,136 +1591,183 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
         }
-        col.addView(monoTv("KAGGLE SETUP", 22, AMBER, true))
-        col.addView(monoTv("1. Go to kaggle.com, create new notebook.\n2. Select 2x T4 GPU in Accelerator.\n3. Paste this ONE command in a cell and run it.", 12, TXT2))
+        col.addView(displayTv("Kaggle setup", 24, AMBER))
+        col.addView(spacer(dp(6)))
+        col.addView(bodyTv(
+            "1. Open kaggle.com and create a new notebook.\n" +
+                "2. Set the Accelerator to 2x T4 GPU.\n" +
+                "3. Paste this one command into a cell and run it.",
+            13, TXT2))
         col.addView(spacer(dp(16)))
 
-        val bootstrapCmd = "!git clone https://github.com/shivaww/Recorder.git /kaggle/working/R && cd /kaggle/working/R/kaggle && python -u bootstrap.py"
+        val bootstrapCmd = "!rm -rf /kaggle/working/R && git clone --depth 1 https://github.com/shivaww/Recorder.git /kaggle/working/R && cd /kaggle/working/R/kaggle && python -u bootstrap.py"
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(STROKE)
-            setPadding(dp(14), dp(14), dp(14), dp(14))
+            background = Console.panelBg(this)
+            setPadding(dp(14), dp(12), dp(14), dp(14))
         }
-        card.addView(monoTv("BOOTSTRAP COMMAND", 12, TXT, true))
+        card.addView(displayTv("Bootstrap command", 12, TXT))
         card.addView(spacer(dp(8)))
         card.addView(TextView(this).apply {
             text = bootstrapCmd
             textSize = 10f
-            typeface = Typeface.MONOSPACE
+            typeface = Console.data()
             setTextColor(TXT2)
             setHorizontallyScrolling(true)
             maxLines = 4
         })
-        card.addView(spacer(dp(8)))
-        card.addView(mkButton("COPY", filled = true).apply {
+        card.addView(spacer(dp(10)))
+        card.addView(mkButton("Copy command", filled = true).apply {
             setOnClickListener {
                 val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                 clipboard.setPrimaryClip(android.content.ClipData.newPlainText("bootstrap", bootstrapCmd))
-                text = "COPIED!"
-                postDelayed({ text = "COPY" }, 2000)
+                text = "COPIED"
+                postDelayed({ text = "COPY COMMAND" }, 2000)
             }
         })
-        col.addView(card)
-        col.addView(spacer(dp(16)))
-        col.addView(monoTv("After running, it will print your API KEY and BASE URL.\nEnter those in the next screen.", 11, TXT2))
-        col.addView(spacer(dp(16)))
-        
-        
-        col.addView(mkButton("CONTINUE TO KAGGLE RENDER", filled = true).apply {
+        col.addView(card, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        col.addView(spacer(dp(14)))
+        col.addView(bodyTv(
+            "When it finishes it prints your API KEY and BASE URL. Enter both on the next screen — the key changes every Kaggle session.",
+            12, TXT2))
+        col.addView(spacer(dp(18)))
+        col.addView(mkButton("Continue to remote queue", filled = true).apply {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52))
             setOnClickListener { showRemoteQueueScreen() }
         })
         col.addView(spacer(dp(8)))
-        col.addView(mkButton("BACK").apply { setOnClickListener { showPickScreen() } })
+        col.addView(mkButton("Back to menu").apply { setOnClickListener { showPickScreen() } })
         
         showScreen(android.widget.ScrollView(this).apply { addView(col) })
     }
 
     // ===================== REMOTE QUEUE SCREEN =====================
 
+    /** DATA-role input on a panel surface with edge stroke. */
+    private fun fieldEt(hint: String, current: String, secret: Boolean = false): EditText =
+        EditText(this).apply {
+            this.hint = hint
+            setText(current)
+            setSingleLine(true)
+            if (secret) {
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
+            setTextColor(TXT)
+            setHintTextColor(TXT2)
+            textSize = 12f
+            typeface = Console.data()
+            background = Console.panelBg(this)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+
     private fun showRemoteQueueScreen() {
-        val pad = dp(20)
+        val pad = dp(18)
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
         }
-        col.addView(monoTv("REMOTE QUEUE (KAGGLE)", 22, AMBER, true))
-        col.addView(monoTv("queue html blocks - render on server", 12, TXT2))
+        col.addView(displayTv("Remote queue", 24, AMBER))
+        col.addView(spacer(dp(4)))
+        col.addView(bodyTv("Queue HTML blocks and render them as one batch on the Kaggle farm.", 13, TXT2))
         col.addView(spacer(dp(16)))
 
-        // --- Connection Settings ---
-        col.addView(monoTv("SETTINGS", 11, TXT2))
-        val baseUrlInput = EditText(this).apply {
-            hint = "Base URL (Cloudflare Tunnel)"
-            setText(securePrefs.baseUrl)
-            setSingleLine(true)
-            setTextColor(TXT)
-            setHintTextColor(TXT2)
-            textSize = 12f
-            typeface = Typeface.MONOSPACE
+        val connCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = Console.panelBg(this)
+            setPadding(dp(14), dp(12), dp(14), dp(14))
         }
-        col.addView(baseUrlInput)
-        val apiKeyInput = EditText(this).apply {
-            hint = "API Key"
-            setText(securePrefs.apiKey)
-            setSingleLine(true)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setTextColor(TXT)
-            setHintTextColor(TXT2)
-            textSize = 12f
-            typeface = Typeface.MONOSPACE
-        }
-        col.addView(apiKeyInput)
-        col.addView(spacer(dp(8)))
-        col.addView(mkButton("SAVE SETTINGS").apply {
+        connCard.addView(displayTv("Connection", 13, TXT))
+        connCard.addView(spacer(dp(6)))
+        connCard.addView(bodyTv(
+            "Paste both values from the notebook READY block. The key changes every Kaggle session.",
+            11, TXT2))
+        connCard.addView(spacer(dp(8)))
+        val baseUrlInput = fieldEt("Base URL (Cloudflare tunnel)", securePrefs.baseUrl)
+        connCard.addView(baseUrlInput)
+        connCard.addView(spacer(dp(6)))
+        val apiKeyInput = fieldEt("API key", securePrefs.apiKey, secret = true)
+        connCard.addView(apiKeyInput)
+        connCard.addView(spacer(dp(10)))
+        val connStatus = bodyTv("", 11, TXT2)
+        val connRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        connRow.addView(mkButton("Save settings", filled = true).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f)
             setOnClickListener {
                 securePrefs.baseUrl = baseUrlInput.text.toString().trim()
                 securePrefs.apiKey = apiKeyInput.text.toString().trim()
-                showRemoteQueueScreen()
+                connStatus.text = "Saved on this device."
+                connStatus.setTextColor(TEAL)
             }
         })
-        col.addView(mkButton("TEST CONNECTION").apply {
+        connRow.addView(spacer(dp(8)))
+        connRow.addView(mkButton("Test connection").apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f)
             setOnClickListener {
                 val url = baseUrlInput.text.toString().trim()
                 val key = apiKeyInput.text.toString().trim()
                 if (url.isEmpty()) { return@setOnClickListener }
-                showBusy("Testing...")
+                connStatus.text = "Testing..."
+                connStatus.setTextColor(TXT2)
                 Thread {
                     val api = RemoteApi(url, key)
                     val (ok, latency) = api.testConnection()
+                    val err = api.lastError ?: ""
                     runOnUiThread {
-                        val msg = if (ok) "Reachable: ${latency}ms" else "Unreachable"
-                        Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
-                        showRemoteQueueScreen()
+                        connStatus.text = when {
+                            ok -> "Connected in ${latency}ms — server accepted the key."
+                            err.contains("403") -> "Server reachable but rejected the API key. Re-copy it from the READY block."
+                            else -> "Cannot reach the server. Check the BASE URL and that the tunnel cell is alive."
+                        }
+                        connStatus.setTextColor(if (ok) TEAL else RED)
                     }
                 }.start()
             }
         })
+        connCard.addView(connRow)
+        connCard.addView(spacer(dp(6)))
+        connCard.addView(connStatus)
+        col.addView(
+            connCard,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        )
 
-        col.addView(spacer(dp(20)))
-        col.addView(monoTv("QUEUE · ${blocks.size} BLOCK" + if (blocks.size == 1) "" else "S", 11, TXT2))
-        
+        col.addView(spacer(dp(18)))
+        col.addView(displayTv("Queue · ${blocks.size} block" + if (blocks.size == 1) "" else "s", 13, TXT))
+        col.addView(spacer(dp(8)))
+        if (blocks.isEmpty()) {
+            col.addView(bodyTv("Nothing queued yet. Add HTML blocks and submit them as one batch.", 12, TXT2))
+        }
         blocks.forEachIndexed { i, b ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
+                background = Console.panelBg(this)
+                setPadding(dp(12), dp(8), dp(8), dp(8))
             }
             row.addView(monoTv("B${i + 1}  ${b.name}", 12, TXT).apply {
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             })
-            row.addView(mkButton("X").apply {
+            row.addView(mkButton("Remove", danger = true).apply {
                 setOnClickListener {
                     blocks.removeAt(i)
                     showRemoteQueueScreen()
                 }
-                layoutParams = LinearLayout.LayoutParams(dp(44), dp(36))
             })
-            col.addView(row)
-            col.addView(spacer(dp(4)))
+            col.addView(
+                row,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+            col.addView(spacer(dp(6)))
         }
-        
-        col.addView(spacer(dp(8)))
-        col.addView(mkButton("+ ADD BLOCK (FILE)", filled = true).apply {
+        col.addView(spacer(dp(6)))
+        col.addView(mkButton("Add block from file", filled = true).apply {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48))
             setOnClickListener {
                 queuePick = true
@@ -1680,7 +1776,7 @@ class MainActivity : Activity() {
             }
         })
         col.addView(spacer(dp(8)))
-        col.addView(mkButton("+ PASTE BLOCK").apply {
+        col.addView(mkButton("Paste block code").apply {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44))
             setOnClickListener {
                 remoteQueuePick = true
@@ -1688,8 +1784,8 @@ class MainActivity : Activity() {
             }
         })
         if (blocks.isNotEmpty()) {
-            col.addView(spacer(dp(4)))
-            col.addView(mkButton("CLEAR QUEUE").apply {
+            col.addView(spacer(dp(8)))
+            col.addView(mkButton("Clear queue", danger = true).apply {
                 setOnClickListener {
                     blocks.clear()
                     blockDir().deleteRecursively()
@@ -1745,19 +1841,20 @@ class MainActivity : Activity() {
         )
 
         col.addView(spacer(dp(20)))
-        uploadBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 100; progress = 0; visibility = android.view.View.GONE
+        uploadBar = Console.rail(this).apply {
+            progress = 0
+            visibility = android.view.View.GONE
         }
         col.addView(uploadBar)
         uploadTv = monoTv("", 10, TXT2).apply { visibility = android.view.View.GONE }
         col.addView(uploadTv)
-        col.addView(spacer(dp(8)))
-        col.addView(mkButton("SUBMIT REMOTE JOBS", filled = true).apply {
+        col.addView(spacer(dp(10)))
+        col.addView(mkButton("Submit jobs to the farm", filled = true).apply {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52))
             setOnClickListener { startRemoteSubmit() }
         })
         col.addView(spacer(dp(8)))
-        col.addView(mkButton("BACK").apply { setOnClickListener { showPickScreen() } })
+        col.addView(mkButton("Back to menu").apply { setOnClickListener { showPickScreen() } })
 
         showScreen(android.widget.ScrollView(this).apply { addView(col) })
     }
