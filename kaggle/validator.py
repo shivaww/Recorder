@@ -11,7 +11,7 @@ Returns structured result the app can display.
 import re
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
-from config import CHROMIUM_FLAGS
+from config import CHROMIUM_FLAGS, CPU_FALLBACK_FLAGS
 
 
 def validate_html(html_path, width=1920, height=1080, timeout_ms=10000):
@@ -45,7 +45,11 @@ def validate_html(html_path, width=1920, height=1080, timeout_ms=10000):
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(args=CHROMIUM_FLAGS)
+            try:
+                browser = p.chromium.launch(args=CHROMIUM_FLAGS)
+            except Exception:
+                print("[validate] GPU launch failed; CPU fallback", flush=True)
+                browser = p.chromium.launch(args=CPU_FALLBACK_FLAGS)
             page = browser.new_page(viewport={"width": width, "height": height})
             page.goto(f"file://{html_path}", wait_until="networkidle", timeout=timeout_ms)
 
