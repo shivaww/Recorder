@@ -32,8 +32,14 @@ def get_api_key(force_new=False):
 
 
 def validate_key(provided):
-    """Check an incoming request's key against stored key."""
-    return secrets.compare_digest(provided or "", get_api_key())
+    """Check an incoming request's key against stored key.
+
+    Whitespace-insensitive: notebook output wraps on narrow screens and
+    pasted keys can carry spaces/newlines; strip all whitespace before
+    comparing so only a genuinely wrong or truncated key fails.
+    """
+    clean = "".join((provided or "").split())
+    return secrets.compare_digest(clean, get_api_key())
 
 
 # ─── CONNECTION CHECKS ────────────────────────────────────────────────────────

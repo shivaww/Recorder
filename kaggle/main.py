@@ -225,12 +225,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _check_key(self):
         if not validate_key(self.headers.get("X-API-Key")):
-            got = self.headers.get("X-API-Key") or ""
+            got = "".join((self.headers.get("X-API-Key") or "").split())
             want = get_api_key()
             print(f"[auth] 403 {self.command} {self.path}: key mismatch "
-                  f"received='{got.strip()[:8]}' len={len(got)} "
+                  f"received='{got[:8]}' len={len(got)} "
                   f"expected='{want[:8]}' len={len(want)} "
-                  f"| same prefix + len diff = whitespace in app key; "
+                  f"| whitespace already stripped; len diff = truncated copy, "
                   f"diff prefix = stale key, re-copy from READY block", flush=True)
             self._send_json(403, {"error": "Forbidden"})
             return False
