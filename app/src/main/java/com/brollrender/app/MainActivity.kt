@@ -51,13 +51,15 @@ class MainActivity : Activity() {
     companion object {
         private const val REQ_PICK = 1
         private const val REQ_NOTIF = 2
-        private const val VOID = 0xFF0A0C10.toInt()
-        private const val AMBER = 0xFFFFB454.toInt()
+        private const val VOID = Console.VOID
+        private const val PANEL = Console.PANEL
+        private const val AMBER = Console.AMBER
         private const val AMBER_DIM = 0x99FFB454.toInt()
-        private const val TXT = 0xFFF2F4F8.toInt()
-        private const val TXT2 = 0xFF8A93A6.toInt()
-        private const val RED = 0xFFFF6B6B.toInt()
-        private const val STROKE = 0xFF232833.toInt()
+        private const val TXT = Console.CHALK
+        private const val TXT2 = Console.CHALK_DIM
+        private const val RED = Console.ALERT
+        private const val TEAL = Console.TEAL
+        private const val STROKE = Console.EDGE
     }
 
     // PICK settings
@@ -119,6 +121,7 @@ class MainActivity : Activity() {
     private var remotePollThread: Thread? = null
     private val jobViews = mutableMapOf<String, Pair<ProgressBar, TextView>>()
     private var gpuHeaderTv: TextView? = null
+    private var pulseView: FarmPulseView? = null
     private val jobFailCount = mutableMapOf<String, Int>()
     @Volatile private var lastGpu: List<RemoteApi.GpuInfo> = emptyList()
     private var uploadBar: ProgressBar? = null
@@ -194,35 +197,53 @@ class MainActivity : Activity() {
     private fun spacer(h: Int): View =
         View(this).apply { layoutParams = LinearLayout.LayoutParams(1, h) }
 
+    /** DATA role: every number, id, eta, log line. */
     private fun monoTv(text: String, sizeSp: Int, color: Int, bold: Boolean = false): TextView =
         TextView(this).apply {
             this.text = text
             textSize = sizeSp.toFloat()
             setTextColor(color)
-            typeface = Typeface.create(
-                Typeface.MONOSPACE,
-                if (bold) Typeface.BOLD else Typeface.NORMAL
-            )
+            typeface = Console.data(bold)
         }
 
-    private fun styleButton(b: Button, filled: Boolean) {
-        if (filled) {
-            b.setBackgroundColor(AMBER)
-            b.setTextColor(VOID)
-        } else {
-            b.setBackgroundColor(STROKE)
-            b.setTextColor(AMBER)
+    /** DISPLAY role: screen titles and section headers. */
+    private fun displayTv(text: String, sizeSp: Int, color: Int): TextView =
+        TextView(this).apply {
+            this.text = text.uppercase()
+            textSize = sizeSp.toFloat()
+            setTextColor(color)
+            typeface = Console.display()
+            letterSpacing = 0.05f
         }
+
+    /** BODY role: helper sentences, empty states, guidance. */
+    private fun bodyTv(text: String, sizeSp: Int, color: Int): TextView =
+        TextView(this).apply {
+            this.text = text
+            textSize = sizeSp.toFloat()
+            setTextColor(color)
+            typeface = Console.body()
+            setLineSpacing(0f, 1.15f)
+        }
+
+    private fun styleButton(b: Button, filled: Boolean, danger: Boolean = false) {
+        b.background = Console.buttonBg(this, filled, danger)
+        b.setTextColor(if (filled) VOID else if (danger) RED else AMBER)
     }
 
-    private fun mkButton(label: String, filled: Boolean = false): Button =
+    private fun mkButton(
+        label: String,
+        filled: Boolean = false,
+        danger: Boolean = false
+    ): Button =
         Button(this).apply {
-            text = label
+            text = label.uppercase()
             textSize = 13f
             isAllCaps = false
-            setPadding(dp(10), dp(9), dp(10), dp(9))
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-            styleButton(this, filled)
+            letterSpacing = 0.06f
+            setPadding(dp(14), dp(11), dp(14), dp(11))
+            typeface = Console.display()
+            styleButton(this, filled, danger)
         }
 
     // ========== PICK SCREEN (single render) + OVERNIGHT QUEUE ==========
@@ -1804,86 +1825,120 @@ class MainActivity : Activity() {
     }
 
     private fun showRemoteJobsScreen() {
-        val pad = dp(20)
+        val pad = dp(18)
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
         }
-        col.addView(monoTv("REMOTE JOBS", 22, AMBER, true))
-        col.addView(spacer(dp(8)))
-        gpuHeaderTv = monoTv(gpuSummary(), 11, TXT2)
+        // Header: display title, the farm-pulse signature, live data row.
+        col.addView(displayTv("Remote jobs", 24, AMBER))
+        col.addView(spacer(dp(10)))
+        pulseView = FarmPulseView(this).apply {
+            setGpus(lastGpu.map { it.id to it.utilPct })
+        }
+        col.addView(pulseView!!)
+        col.addView(spacer(dp(6)))
+        gpuHeaderTv = monoTv(gpuSummary(), 10, TXT2)
         col.addView(gpuHeaderTv!!)
-        col.addView(spacer(dp(8)))
-        col.addView(mkButton("CLEAR FINISHED / STUCK").apply {
+        col.addView(spacer(dp(14)))
+        col.addView(mkButton("Clear finished jobs").apply {
             setOnClickListener { clearQueue() }
         })
-        col.addView(spacer(dp(12)))
+        col.addView(spacer(dp(16)))
         jobViews.clear()
 
         synchronized(remoteJobs) {
             if (remoteJobs.isEmpty()) {
-                col.addView(monoTv("No active jobs.", 12, TXT2))
+                col.addView(bodyTv(
+                    "No jobs on the farm yet. Submit a clip and the T4s start rendering it here.",
+                    13, TXT2))
             } else {
                 remoteJobs.forEachIndexed { idx, job ->
-                    val card = LinearLayout(this).apply {
-                        orientation = LinearLayout.VERTICAL
-                        setBackgroundColor(STROKE)
-                        setPadding(dp(14), dp(14), dp(14), dp(14))
-                    }
-                    card.addView(monoTv(job.fileName, 13, TXT, true))
-                    card.addView(monoTv("ID: ${job.jobId}", 10, TXT2))
-                    card.addView(monoTv("State: ${job.state}", 12, AMBER))
-                    job.error?.let { card.addView(monoTv("ERR: $it", 10, 0xFFFF5252.toInt())) }
-                    
-                    if (job.state == "INVALID") {
-                        card.addView(monoTv("Validation failed — check HTML", 11, TXT2))
-                    } else if (job.state == "VALIDATING") {
-                        card.addView(monoTv("Validating HTML...", 11, TXT2))
-                    } else if (job.state == "WAITING_START") {
-                        card.addView(mkButton("START RENDER", filled = true).apply {
-                            setOnClickListener { startRemoteJob(job.jobId) }
-                        })
-                    } else if (job.state == "FAILED") {
-                        card.addView(mkButton("RETRY").apply {
-                            setOnClickListener { retryRemoteJob(job.jobId) }
-                        })
-                    } else if (job.state == "DONE" && !job.downloaded) {
-                        val dlBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-                            max = 100
-                            progress = 0
-                        }
-                        val dlText = monoTv("", 10, TXT2)
-                        card.addView(dlBar)
-                        card.addView(dlText)
-                        card.addView(mkButton("DOWNLOAD", filled = true).apply {
-                            setOnClickListener { startRemoteDownload(idx, dlBar, dlText) }
-                        })
-                    } else if (job.downloaded) {
-                        card.addView(monoTv("Downloaded", 11, AMBER))
-                    } else {
-                        if (job.state == "RENDERING" || job.state == "ENCODING") {
-                            val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-                                max = 100
-                                progress = job.progress
-                            }
-                            val ptxt = monoTv("${job.progress}% · ETA ${if (job.etaSec >= 0) job.etaSec.toString() + "s" else "--"}", 10, TXT2)
-                            card.addView(bar)
-                            card.addView(ptxt)
-                            jobViews[job.jobId] = bar to ptxt
-                        }
-                        card.addView(mkButton("CANCEL").apply {
-                            setOnClickListener { cancelRemoteJob(idx) }
-                        })
-                    }
-                    col.addView(card)
-                    col.addView(spacer(dp(8)))
+                    col.addView(
+                        jobCard(idx, job),
+                        LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT
+                        )
+                    )
+                    col.addView(spacer(dp(10)))
                 }
             }
         }
-        
+
         col.addView(spacer(dp(20)))
-        col.addView(mkButton("BACK").apply { setOnClickListener { showPickScreen() } })
+        col.addView(mkButton("Back to menu").apply { setOnClickListener { showPickScreen() } })
         showScreen(android.widget.ScrollView(this).apply { addView(col) })
+    }
+
+    /** One job card: panel surface, state stripe, data rows, rail, actions. */
+    private fun jobCard(idx: Int, job: JobStore.JobMeta): LinearLayout {
+        val stripe = Console.stateColor(job.state, job.downloaded)
+        val bodyCol = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(14))
+        }
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            background = Console.panelBg(this)
+        }
+        card.addView(View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(3), ViewGroup.LayoutParams.MATCH_PARENT)
+            setBackgroundColor(stripe)
+        })
+        card.addView(
+            bodyCol,
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        bodyCol.addView(monoTv(job.fileName, 13, TXT, true))
+        bodyCol.addView(spacer(dp(2)))
+        bodyCol.addView(monoTv("${job.jobId}  ·  ${job.state}", 10, stripe))
+        job.error?.let {
+            bodyCol.addView(bodyTv("Failed: $it — retry or resubmit the clip.", 11, TXT2))
+        }
+        when {
+            job.state == "INVALID" ->
+                bodyCol.addView(bodyTv(
+                    "The server rejected this HTML (no animation found). Fix the clip and submit it again.",
+                    11, TXT2))
+            job.state == "VALIDATING" ->
+                bodyCol.addView(bodyTv("Checking the HTML on the server...", 11, TXT2))
+            job.state == "WAITING_START" ->
+                bodyCol.addView(mkButton("Start render", filled = true).apply {
+                    setOnClickListener { startRemoteJob(job.jobId) }
+                })
+            job.state == "FAILED" ->
+                bodyCol.addView(mkButton("Retry render").apply {
+                    setOnClickListener { retryRemoteJob(job.jobId) }
+                })
+            job.state == "DONE" && !job.downloaded -> {
+                val dlBar = Console.rail(this).apply { progress = 0 }
+                val dlText = monoTv("", 10, TXT2)
+                bodyCol.addView(dlBar)
+                bodyCol.addView(dlText)
+                bodyCol.addView(mkButton("Download video", filled = true).apply {
+                    setOnClickListener { startRemoteDownload(idx, dlBar, dlText) }
+                })
+            }
+            job.downloaded ->
+                bodyCol.addView(monoTv("Saved to gallery", 11, TEAL))
+            else -> {
+                if (job.state == "RENDERING" || job.state == "ENCODING") {
+                    val bar = Console.rail(this).apply { progress = job.progress }
+                    val ptxt = monoTv(
+                        "${job.progress}%  ·  ETA " +
+                            (if (job.etaSec >= 0) "${job.etaSec}s" else "--"),
+                        10, TXT2)
+                    bodyCol.addView(bar)
+                    bodyCol.addView(ptxt)
+                    jobViews[job.jobId] = bar to ptxt
+                }
+                bodyCol.addView(mkButton("Cancel job", danger = true).apply {
+                    setOnClickListener { cancelRemoteJob(idx) }
+                })
+            }
+        }
+        return card
     }
 
     private fun gpuSummary(): String {
@@ -2087,7 +2142,10 @@ class MainActivity : Activity() {
                             }
                             Thread.sleep(1500)
                         }
-                        runOnUiThread { gpuHeaderTv?.text = gpuSummary() }
+                        runOnUiThread {
+                            gpuHeaderTv?.text = gpuSummary()
+                            pulseView?.setGpus(lastGpu.map { it.id to it.utilPct })
+                        }
                         if (changed) {
                             jobStore.saveAll(remoteJobs)
                             runOnUiThread { if (currentScreen is android.widget.ScrollView) showRemoteJobsScreen() }
