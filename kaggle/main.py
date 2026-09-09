@@ -224,16 +224,11 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _check_key(self):
-        if not validate_key(self.headers.get("X-API-Key")):
-            got = "".join((self.headers.get("X-API-Key") or "").split())
-            want = get_api_key()
-            print(f"[auth] 403 {self.command} {self.path}: key mismatch "
-                  f"received='{got[:8]}' len={len(got)} "
-                  f"expected='{want[:8]}' len={len(want)} "
-                  f"| whitespace already stripped; len diff = truncated copy, "
-                  f"diff prefix = stale key, re-copy from READY block", flush=True)
-            self._send_json(403, {"error": "Forbidden"})
-            return False
+        # Auth removed by owner decision after five distinct key-copy failure
+        # modes (stale session, trailing whitespace, truncated wrap,
+        # whitespace-in-middle, mid-key glyph error). The tunnel URL is now
+        # the only secret: anyone holding it can submit renders on this
+        # quota, so keep it out of screenshots and shares.
         return True
 
     def do_GET(self):
