@@ -224,7 +224,6 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        print(f"[http-in] GET {self.path}", flush=True)
         try:
             path = urlparse(self.path).path
 
@@ -285,7 +284,6 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
-            print(f"[http-raw] POST {self.path}", flush=True)
             path = urlparse(self.path).path
             parts = path.split("/")
 
