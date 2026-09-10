@@ -394,6 +394,16 @@ class MainActivity : Activity() {
             ),
             if (resW == 1920 && fps == 30) 0 else 1
         )
+        toggleRow(
+            col, "BITRATE",
+            listOf(
+                "12M mob" to { bitRate = 12_000_000 },
+                "20M mob" to { bitRate = 20_000_000 },
+                "40M lap" to { bitRate = 40_000_000 },
+                "80M max" to { bitRate = 80_000_000 }
+            ),
+            if (bitRate == 12_000_000) 0 else if (bitRate == 20_000_000) 1 else if (bitRate == 40_000_000) 2 else 3
+        )
         prepared?.let { p ->
             col.addView(spacer(dp(14)))
             col.addView(monoTv("DURATION  auto ${p.durationMs / 1000} s - editable on preview", 12, TXT2))
@@ -516,15 +526,23 @@ class MainActivity : Activity() {
                 "FINAL" to {
                     qResRow.select(0); resW = 1920; resH = 1080
                     qFpsRow.select(0); fps = 30
-                    bitRate = 16_000_000
                 },
                 "DRAFT" to {
                     qResRow.select(1); resW = 1280; resH = 720
                     qFpsRow.select(1); fps = 24
-                    bitRate = 8_000_000
                 }
             ),
             if (resW == 1920 && fps == 30) 0 else 1
+        )
+        toggleRow(
+            col, "BITRATE",
+            listOf(
+                "12M mob" to { bitRate = 12_000_000 },
+                "20M mob" to { bitRate = 20_000_000 },
+                "40M lap" to { bitRate = 40_000_000 },
+                "80M max" to { bitRate = 80_000_000 }
+            ),
+            if (bitRate == 12_000_000) 0 else if (bitRate == 20_000_000) 1 else if (bitRate == 40_000_000) 2 else 3
         )
         // ENHANCE applies to every block in the batch (one global setting).
         toggleRow(
@@ -1876,15 +1894,23 @@ class MainActivity : Activity() {
                 "FINAL" to {
                     qResRow.select(0); resW = 1920; resH = 1080
                     qFpsRow.select(0); fps = 30
-                    bitRate = 16_000_000
                 },
                 "DRAFT" to {
                     qResRow.select(1); resW = 1280; resH = 720
                     qFpsRow.select(1); fps = 24
-                    bitRate = 8_000_000
                 }
             ),
             if (resW == 1920 && fps == 30) 0 else 1
+        )
+        toggleRow(
+            col, "BITRATE",
+            listOf(
+                "12M mob" to { bitRate = 12_000_000 },
+                "20M mob" to { bitRate = 20_000_000 },
+                "40M lap" to { bitRate = 40_000_000 },
+                "80M max" to { bitRate = 80_000_000 }
+            ),
+            if (bitRate == 12_000_000) 0 else if (bitRate == 20_000_000) 1 else if (bitRate == 40_000_000) 2 else 3
         )
         toggleRow(
             col, "ENHANCE",
