@@ -1,8 +1,10 @@
-"""encoder.py — Lossless NVENC video encoding.
+"""encoder.py — Visually-lossless NVENC video encoding.
 
 Encodes PNG frame sequences to H.264 MP4 using NVIDIA's hardware encoder.
 Falls back to libx264 if NVENC is unavailable.
-Uses yuv444p to preserve chroma fidelity from PNG source.
+Uses yuv420p + High profile so Android hardware decoders (Gallery) can
+play the result, at cq/crf 14 (visually lossless): high quality but a
+comfortable bitrate for mobile editors and playback.
 """
 import os
 import subprocess
@@ -14,8 +16,8 @@ class EncodeError(Exception):
     pass
 
 
-def encode_video(frames_dir, output_path, fps, wav_path=None, gpu_id=0):
-    """Encode frames to MP4 with lossless NVENC.
+def encode_video(frames_dir, output_path, fps, wav_path=None, gpu_id=0, bitrate=20000000):
+    """Encode frames to MP4 with visually-lossless NVENC.
 
     Args:
         frames_dir: directory containing frame_%05d.png files
@@ -32,7 +34,7 @@ def encode_video(frames_dir, output_path, fps, wav_path=None, gpu_id=0):
     """
     frame_pattern = os.path.join(frames_dir, "frame_%05d.png")
 
-    # Primary: lossless NVENC on assigned GPU
+    # Primary: visually-lossless NVENC (cq 14) on assigned GPU
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
         "-framerate", str(fps),
@@ -47,7 +49,9 @@ def encode_video(frames_dir, output_path, fps, wav_path=None, gpu_id=0):
         "-preset", "p7",
         "-tune", "hq",
         "-rc", "vbr",
-        "-cq", "16",
+        "-b:v", str(bitrate),
+        "-maxrate", str(int(bitrate * 1.25)),
+        "-bufsize", str(bitrate * 2),
         "-pix_fmt", "yuv420p",
         "-profile:v", "high",
         "-color_range", "pc",
@@ -75,7 +79,7 @@ def encode_video(frames_dir, output_path, fps, wav_path=None, gpu_id=0):
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
 
-    # Fallback: libx264 CRF 0 (mathematically lossless)
+    # Fallback: libx264 CRF 14 (visually lossless)
     cmd_fallback = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
         "-framerate", str(fps),
@@ -86,7 +90,9 @@ def encode_video(frames_dir, output_path, fps, wav_path=None, gpu_id=0):
 
     cmd_fallback += [
         "-c:v", "libx264",
-        "-crf", "16",
+        "-b:v", str(bitrate),
+        "-maxrate", str(int(bitrate * 1.25)),
+        "-bufsize", str(bitrate * 2),
         "-preset", "slow",
         "-pix_fmt", "yuv420p",
         "-profile:v", "high",

@@ -69,7 +69,7 @@ class MainActivity : Activity() {
     private var resW = 1920
     private var resH = 1080
     private var fps = 30
-    private var bitRate = 16_000_000 // Mbps x 1e6 - user-adjustable on preview
+    private var bitRate = 20_000_000 // Mbps x 1e6 - user-adjustable on preview
 
     // PREVIEW state
     private var htmlFile: File? = null
@@ -345,10 +345,10 @@ class MainActivity : Activity() {
         val resRow = toggleRow(
             col, "RESOLUTION",
             listOf(
-                "4K" to { resW = 3840; resH = 2160; bitRate = 40_000_000 },
-                "1080p" to { resW = 1920; resH = 1080; bitRate = 16_000_000 },
-                "720p" to { resW = 1280; resH = 720; bitRate = 8_000_000 },
-                "480p" to { resW = 854; resH = 480; bitRate = 8_000_000 }
+                "4K" to { resW = 3840; resH = 2160 },
+                "1080p" to { resW = 1920; resH = 1080 },
+                "720p" to { resW = 1280; resH = 720 },
+                "480p" to { resW = 854; resH = 480 }
             ),
             if (resW == 3840) 0 else if (resW == 1920) 1 else if (resW == 1280) 2 else 3
         )
@@ -368,12 +368,10 @@ class MainActivity : Activity() {
                 "FINAL" to {
                     resRow.select(0); resW = 1920; resH = 1080
                     fpsRow.select(0); fps = 30
-                    bitRate = 16_000_000
                 },
                 "DRAFT" to {
                     resRow.select(1); resW = 1280; resH = 720
                     fpsRow.select(1); fps = 24
-                    bitRate = 8_000_000
                 }
             ),
             if (resW == 1920 && fps == 30) 0 else 1
@@ -476,10 +474,10 @@ class MainActivity : Activity() {
         val qResRow = toggleRow(
             col, "RESOLUTION",
             listOf(
-                "4K" to { resW = 3840; resH = 2160; bitRate = 40_000_000 },
-                "1080p" to { resW = 1920; resH = 1080; bitRate = 16_000_000 },
-                "720p" to { resW = 1280; resH = 720; bitRate = 8_000_000 },
-                "480p" to { resW = 854; resH = 480; bitRate = 8_000_000 }
+                "4K" to { resW = 3840; resH = 2160 },
+                "1080p" to { resW = 1920; resH = 1080 },
+                "720p" to { resW = 1280; resH = 720 },
+                "480p" to { resW = 854; resH = 480 }
             ),
             if (resW == 3840) 0 else if (resW == 1920) 1 else if (resW == 1280) 2 else 3
         )
@@ -960,12 +958,12 @@ class MainActivity : Activity() {
         toggleRow(
             col, "BITRATE",
             listOf(
-                "8M" to { bitRate = 8_000_000 },
-                "16M" to { bitRate = 16_000_000 },
-                "24M" to { bitRate = 24_000_000 },
-                "40M" to { bitRate = 40_000_000 }
+                "12M mob" to { bitRate = 12_000_000 },
+                "20M mob" to { bitRate = 20_000_000 },
+                "40M lap" to { bitRate = 40_000_000 },
+                "80M max" to { bitRate = 80_000_000 }
             ),
-            if (bitRate == 8_000_000) 0 else if (bitRate == 16_000_000) 1 else if (bitRate == 24_000_000) 2 else 3
+            if (bitRate == 12_000_000) 0 else if (bitRate == 20_000_000) 1 else if (bitRate == 40_000_000) 2 else 3
         )
 
         // SFX: synthesized sound baked into the MP4's audio track when
@@ -1832,10 +1830,10 @@ class MainActivity : Activity() {
         val qResRow = toggleRow(
             col, "RESOLUTION",
             listOf(
-                "4K" to { resW = 3840; resH = 2160; bitRate = 40_000_000 },
-                "1080p" to { resW = 1920; resH = 1080; bitRate = 16_000_000 },
-                "720p" to { resW = 1280; resH = 720; bitRate = 8_000_000 },
-                "480p" to { resW = 854; resH = 480; bitRate = 8_000_000 }
+                "4K" to { resW = 3840; resH = 2160 },
+                "1080p" to { resW = 1920; resH = 1080 },
+                "720p" to { resW = 1280; resH = 720 },
+                "480p" to { resW = 854; resH = 480 }
             ),
             if (resW == 3840) 0 else if (resW == 1920) 1 else if (resW == 1280) 2 else 3
         )
@@ -1914,7 +1912,7 @@ class MainActivity : Activity() {
             var successCount = 0
             
             blocks.forEach { block ->
-                val jobId = api.submitJob(block.file, fps, resStr, 10, batchEnhance) { pct ->
+                val jobId = api.submitJob(block.file, fps, resStr, 10, batchEnhance, bitRate) { pct ->
                     runOnUiThread {
                         uploadBar?.progress = pct
                         uploadTv?.text = "Uploading ${block.name}: $pct%"

@@ -106,6 +106,7 @@ def process_job(job_id):
         resolution = job["resolution"]
         duration = job.get("eff_duration") or job["duration"] or 10
         enhance = job["enhance"]
+        bitrate = job.get("bitrate", 20000000)
         cancel_event = job["cancel_event"]
         gpu_id = job["gpu"]
         telemetry = job["telemetry"]
@@ -140,7 +141,7 @@ def process_job(job_id):
 
         # Phase 3: Encode
         telemetry.mark_encoding()
-        encode_video(frames_dir, output_mp4, fps, wav_path, gpu_id)
+        encode_video(frames_dir, output_mp4, fps, wav_path, gpu_id, bitrate)
 
         # Cleanup frames
         shutil.rmtree(frames_dir, ignore_errors=True)
@@ -307,6 +308,7 @@ class Handler(BaseHTTPRequestHandler):
                     duration = float(fields.get("duration", 10))
                     resolution = fields.get("resolution", "1920x1080")
                     enhance = fields.get("enhance", "false").lower() == "true"
+                    bitrate = int(fields.get("bitrate", 20000000))
                 except (ValueError, IndexError):
                     self._send_json(400, {"error": "Invalid parameters"})
                     return
@@ -335,6 +337,7 @@ class Handler(BaseHTTPRequestHandler):
                         "resolution": resolution,
                         "duration": duration,
                         "enhance": enhance,
+                        "bitrate": bitrate,
                         "gpu": assign_gpu(),
                         "cancel_event": threading.Event(),
                         "telemetry": telemetry,

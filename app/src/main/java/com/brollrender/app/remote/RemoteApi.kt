@@ -55,7 +55,7 @@ class RemoteApi(private val baseUrl: String) {
     var lastError: String? = null
         private set
 
-    fun submitJob(htmlFile: File, fps: Int, resolution: String, duration: Int, enhance: Boolean, onProgress: ((Int) -> Unit)? = null): String? {
+    fun submitJob(htmlFile: File, fps: Int, resolution: String, duration: Int, enhance: Boolean, bitrate: Int, onProgress: ((Int) -> Unit)? = null): String? {
         lastError = null
         val boundary = "broll-boundary-${System.currentTimeMillis()}"
         val conn = connect("/jobs", "POST", 30000).apply {
@@ -76,6 +76,7 @@ class RemoteApi(private val baseUrl: String) {
             writeField("resolution", resolution)
             writeField("duration", duration)
             writeField("enhance", enhance)
+            writeField("bitrate", bitrate)
             
             writeField("encoding", "base64")
             out.write("--$boundary\r\n".toByteArray())
