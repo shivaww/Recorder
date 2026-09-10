@@ -44,11 +44,12 @@ def encode_video(frames_dir, output_path, fps, wav_path=None, gpu_id=0):
 
     cmd += [
         "-c:v", "h264_nvenc",
-        "-preset", "lossless",
-        "-tune", "lossless",
-        "-rc", "constqp",
-        "-qp", "0",
-        "-pix_fmt", "yuv444p",
+        "-preset", "p7",
+        "-tune", "hq",
+        "-rc", "vbr",
+        "-cq", "16",
+        "-pix_fmt", "yuv420p",
+        "-profile:v", "high",
         "-color_range", "pc",
         "-colorspace", "bt709",
         "-color_primaries", "bt709",
@@ -62,6 +63,7 @@ def encode_video(frames_dir, output_path, fps, wav_path=None, gpu_id=0):
             "-shortest",
         ]
 
+    cmd += ["-movflags", "+faststart"]
     cmd.append(output_path)
 
     env = {**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu_id)}
@@ -84,12 +86,14 @@ def encode_video(frames_dir, output_path, fps, wav_path=None, gpu_id=0):
 
     cmd_fallback += [
         "-c:v", "libx264",
-        "-crf", "0",
-        "-preset", "veryslow",
-        "-pix_fmt", "yuv444p",
+        "-crf", "16",
+        "-preset", "slow",
+        "-pix_fmt", "yuv420p",
+        "-profile:v", "high",
     ]
     if wav_path and os.path.exists(wav_path):
         cmd_fallback += ["-c:a", "aac", "-b:a", "128k", "-shortest"]
+    cmd_fallback += ["-movflags", "+faststart"]
     cmd_fallback.append(output_path)
 
     try:
