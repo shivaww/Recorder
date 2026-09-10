@@ -35,6 +35,8 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.Locale
 import com.brollrender.app.remote.*
 import kotlin.math.roundToInt
@@ -51,6 +53,7 @@ class MainActivity : Activity() {
     companion object {
         private const val REQ_PICK = 1
         private const val REQ_NOTIF = 2
+        private const val REQ_SAVE_PROMPT = 3
         private const val VOID = Console.VOID
         private const val PANEL = Console.PANEL
         private const val AMBER = Console.AMBER
@@ -102,6 +105,7 @@ class MainActivity : Activity() {
     // true = overnight queue (+ ADD BLOCK stages a block).
     private var queuePick = false
     private var remoteQueuePick = false
+    private var pendingPromptText: String? = null
 
     // DONE state
     private var doneUri: Uri? = null
@@ -327,6 +331,14 @@ class MainActivity : Activity() {
                 dp(48)
             )
             setOnClickListener { showRemoteJobsScreen() }
+        })
+        col.addView(spacer(dp(8)))
+        col.addView(mkButton("Download generation prompt").apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(48)
+            )
+            setOnClickListener { downloadGenerationPrompt(this) }
         })
         col.addView(spacer(dp(28)))
 
@@ -655,6 +667,20 @@ class MainActivity : Activity() {
     @Suppress("DEPRECATION")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_SAVE_PROMPT) {
+            val text = pendingPromptText
+            pendingPromptText = null
+            val destUri = data?.data
+            if (resultCode == RESULT_OK && text != null && destUri != null) {
+                try {
+                    contentResolver.openOutputStream(destUri)?.use { out -> out.write(text.toByteArray()) }
+                    Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+            return
+        }
         if (requestCode != REQ_PICK || resultCode != RESULT_OK) return
         val uri = data?.data ?: return
         if (queuePick) {
@@ -2208,6 +2234,40 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun downloadGenerationPrompt(button: Button) {
+        button.isEnabled = false
+        button.text = "FETCHING..."
+        Thread {
+            var fetched: String? = null
+            try {
+                val conn = (URL("https://raw.githubusercontent.com/shivaww/Recorder/main/GENERATION_PROMPT.md")
+                    .openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 15000
+                    readTimeout = 15000
+                    instanceFollowRedirects = true
+                }
+                if (conn.responseCode in 200..299) {
+                    fetched = conn.inputStream.bufferedReader().use { it.readText() }
+                }
+                conn.disconnect()
+            } catch (_: Exception) {}
+            runOnUiThread {
+                button.isEnabled = true
+                button.text = "Download generation prompt"
+                if (fetched != null) {
+                    pendingPromptText = fetched
+                    val i = Intent(Intent.ACTION_CREATE_DOCUMENT)
+                    i.addCategory(Intent.CATEGORY_OPENABLE)
+                    i.type = "text/markdown"
+                    i.putExtra(Intent.EXTRA_TITLE, "GENERATION_PROMPT.md")
+                    startActivityForResult(i, REQ_SAVE_PROMPT)
+                } else {
+                    Toast.makeText(this, "Fetch failed", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }.start()
+    }
     private fun cancelRemoteJob(idx: Int) {
         val job = synchronized(remoteJobs) { remoteJobs.getOrNull(idx) } ?: return
         showBusy("Cancelling...")
