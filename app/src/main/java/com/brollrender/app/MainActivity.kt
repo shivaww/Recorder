@@ -126,6 +126,8 @@ class MainActivity : Activity() {
     @Volatile private var lastGpu: List<RemoteApi.GpuInfo> = emptyList()
     private var uploadBar: ProgressBar? = null
     private var uploadTv: TextView? = null
+    private var batchStatusTv: TextView? = null
+    @Volatile private var batchActionRunning = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -316,6 +318,15 @@ class MainActivity : Activity() {
                 dp(48)
             )
             setOnClickListener { showKaggleSetupScreen() }
+        })
+        col.addView(spacer(dp(8)))
+        val farmCount = synchronized(remoteJobs) { remoteJobs.size }
+        col.addView(mkButton(if (farmCount > 0) "View farm jobs ($farmCount)" else "View farm jobs").apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(48)
+            )
+            setOnClickListener { showRemoteJobsScreen() }
         })
         col.addView(spacer(dp(28)))
 
@@ -1933,6 +1944,23 @@ class MainActivity : Activity() {
         gpuHeaderTv = monoTv(gpuSummary(), 10, TXT2)
         col.addView(gpuHeaderTv!!)
         col.addView(spacer(dp(14)))
+        val waitingCount = synchronized(remoteJobs) { remoteJobs.count { it.state == "WAITING_START" } }
+        val downloadableCount = synchronized(remoteJobs) { remoteJobs.count { it.state == "DONE" && !it.downloaded } }
+        if (waitingCount > 0) {
+            col.addView(mkButton("Start all jobs ($waitingCount)", filled = true).apply {
+                setOnClickListener { startAllRemoteJobs() }
+            })
+            col.addView(spacer(dp(8)))
+        }
+        if (downloadableCount > 0) {
+            col.addView(mkButton("Download all ($downloadableCount)", filled = true).apply {
+                setOnClickListener { downloadAllRemote() }
+            })
+            col.addView(spacer(dp(8)))
+        }
+        batchStatusTv = monoTv("", 11, TXT2)
+        col.addView(batchStatusTv!!)
+        col.addView(spacer(dp(8)))
         col.addView(mkButton("Clear finished jobs").apply {
             setOnClickListener { clearQueue() }
         })
@@ -2046,14 +2074,44 @@ class MainActivity : Activity() {
         showRemoteJobsScreen()
     }
 
+    /** Blocking: downloads one job's video, exports + verifies it, marks it
+     * downloaded, and cleans it up server-side. Returns success. Touches no
+     * UI except via [onProgress] — callers own their own screen refresh. */
+    private fun downloadJobBlocking(idx: Int, onProgress: (Int, Double) -> Unit): Boolean {
+        val job = synchronized(remoteJobs) { remoteJobs.getOrNull(idx) } ?: return false
+        val api = RemoteApi(securePrefs.baseUrl)
+
+        val tempFile = File(cacheDir, "broll_${job.jobId}.mp4")
+        if (!api.downloadFile(job.jobId, tempFile, onProgress)) return false
+
+        val uri = exportTempToMediaStore(tempFile, job.fileName)
+        tempFile.delete()
+        if (uri == null) return false
+
+        var verified = false
+        try {
+            val r = MediaMetadataRetriever()
+            r.setDataSource(this, uri)
+            val vw = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            val vh = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            r.release()
+            verified = (vw > 0 && vh > 0)
+        } catch (_: Exception) {}
+        if (!verified) return false
+
+        api.cancelJob(job.jobId) // DELETE to clean up server
+        synchronized(remoteJobs) {
+            remoteJobs[idx].downloaded = true
+            remoteJobs[idx].localUri = uri.toString()
+        }
+        jobStore.saveAll(remoteJobs)
+        return true
+    }
+
     private fun startRemoteDownload(idx: Int, bar: ProgressBar, txt: TextView) {
         val job = synchronized(remoteJobs) { remoteJobs.getOrNull(idx) } ?: return
         Thread {
-            val url = securePrefs.baseUrl
-            val api = RemoteApi(url)
-            
-            val tempFile = File(cacheDir, "broll_${job.jobId}.mp4")
-            val ok = api.downloadFile(job.jobId, tempFile) { pct, speedKbps ->
+            val ok = downloadJobBlocking(idx) { pct, speedKbps ->
                 runOnUiThread {
                     if (pct >= 0) {
                         bar.progress = pct
@@ -2063,41 +2121,65 @@ class MainActivity : Activity() {
                     }
                 }
             }
-            
-            if (!ok) {
-                runOnUiThread { showErrorScreen("Download failed for ${job.fileName}") }
-                return@Thread
+            runOnUiThread {
+                if (ok) showRemoteJobsScreen() else showErrorScreen("Download failed for ${job.fileName}")
             }
-            
-            // Export to MediaStore
-            val uri = exportTempToMediaStore(tempFile, job.fileName)
-            tempFile.delete()
-            if (uri == null) {
-                runOnUiThread { showErrorScreen("Failed to save ${job.fileName} to MediaStore") }
-                return@Thread
-            }
-            
-            // Local verification
-            var verified = false
-            try {
-                val r = MediaMetadataRetriever()
-                r.setDataSource(this, uri)
-                val vw = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
-                val vh = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
-                r.release()
-                verified = (vw > 0 && vh > 0)
-            } catch (_: Exception) {}
-            
-            if (verified) {
-                api.cancelJob(job.jobId) // DELETE to clean up server
-                synchronized(remoteJobs) {
-                    remoteJobs[idx].downloaded = true
-                    remoteJobs[idx].localUri = uri.toString()
+        }.start()
+    }
+
+    private fun downloadAllRemote() {
+        if (batchActionRunning) return
+        val pending = synchronized(remoteJobs) {
+            remoteJobs.withIndex().filter { (_, j) -> j.state == "DONE" && !j.downloaded }.map { it.index }
+        }
+        if (pending.isEmpty()) return
+        batchActionRunning = true
+        Thread {
+            var failCount = 0
+            pending.forEachIndexed { i, idx ->
+                val name = synchronized(remoteJobs) { remoteJobs.getOrNull(idx)?.fileName } ?: ""
+                val ok = downloadJobBlocking(idx) { pct, speedKbps ->
+                    runOnUiThread {
+                        batchStatusTv?.text = if (pct >= 0)
+                            "Downloading ${i + 1}/${pending.size}: $name — $pct%"
+                        else
+                            "Downloading ${i + 1}/${pending.size}: $name — ${String.format("%.1f", speedKbps)} KB/s"
+                    }
                 }
-                jobStore.saveAll(remoteJobs)
-                runOnUiThread { showRemoteJobsScreen() }
-            } else {
-                runOnUiThread { showErrorScreen("Verification failed for ${job.fileName}") }
+                if (!ok) failCount++
+            }
+            batchActionRunning = false
+            runOnUiThread {
+                batchStatusTv?.text =
+                    if (failCount > 0) "Done — $failCount failed, retry from the job list." else ""
+                showRemoteJobsScreen()
+            }
+        }.start()
+    }
+
+    private fun startAllRemoteJobs() {
+        if (batchActionRunning) return
+        val ids = synchronized(remoteJobs) {
+            remoteJobs.filter { it.state == "WAITING_START" }.map { it.jobId }
+        }
+        if (ids.isEmpty()) return
+        batchActionRunning = true
+        Thread {
+            val api = RemoteApi(securePrefs.baseUrl)
+            ids.forEachIndexed { i, jobId ->
+                runOnUiThread { batchStatusTv?.text = "Starting ${i + 1}/${ids.size}..." }
+                if (api.startJob(jobId)) {
+                    synchronized(remoteJobs) {
+                        val idx = remoteJobs.indexOfFirst { it.jobId == jobId }
+                        if (idx >= 0) remoteJobs[idx].state = "RENDERING"
+                    }
+                }
+            }
+            jobStore.saveAll(remoteJobs)
+            batchActionRunning = false
+            runOnUiThread {
+                batchStatusTv?.text = ""
+                showRemoteJobsScreen()
             }
         }.start()
     }
