@@ -17,7 +17,6 @@ class SecurePrefs(context: Context) {
     companion object {
         private const val KEY_ALIAS = "broll_remote_key"
         private const val PREF_BASE_URL = "base_url"
-        private const val PREF_API_KEY = "api_key"
         private const val GCM_IV_LENGTH = 12
         private const val GCM_TAG_LENGTH = 128
     }
@@ -70,8 +69,4 @@ class SecurePrefs(context: Context) {
     var baseUrl: String
         get() = if (prefs.contains(PREF_BASE_URL)) decrypt(prefs.getString(PREF_BASE_URL, "")!!) else ""
         set(value) = prefs.edit().putString(PREF_BASE_URL, encrypt(value)).apply()
-
-    var apiKey: String
-        get() = if (prefs.contains(PREF_API_KEY)) decrypt(prefs.getString(PREF_API_KEY, "")!!) else ""
-        set(value) = prefs.edit().putString(PREF_API_KEY, encrypt(value)).apply()
 }

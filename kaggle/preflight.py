@@ -1,45 +1,16 @@
-"""preflight.py — Environment validation, connection checks, API key management.
+"""preflight.py — Environment validation and connection checks.
 
 Import this from main.py before starting the server:
-    from preflight import run_preflight, get_api_key
+    from preflight import run_preflight
 """
 import os
 import sys
 import shutil
 import subprocess
-import secrets
 import socket
 import urllib.request
 
-KEY_FILE = "/kaggle/working/.broll_api_key"
 PORT = 8000
-
-
-# ─── API KEY ──────────────────────────────────────────────────────────────────
-
-def get_api_key(force_new=False):
-    """Load or generate the API key. Persists to KEY_FILE."""
-    if not force_new and os.path.exists(KEY_FILE):
-        with open(KEY_FILE, "r") as f:
-            key = f.read().strip()
-            if key:
-                return key
-    key = secrets.token_urlsafe(32)
-    os.makedirs(os.path.dirname(KEY_FILE), exist_ok=True)
-    with open(KEY_FILE, "w") as f:
-        f.write(key)
-    return key
-
-
-def validate_key(provided):
-    """Check an incoming request's key against stored key.
-
-    Whitespace-insensitive: notebook output wraps on narrow screens and
-    pasted keys can carry spaces/newlines; strip all whitespace before
-    comparing so only a genuinely wrong or truncated key fails.
-    """
-    clean = "".join((provided or "").split())
-    return secrets.compare_digest(clean, get_api_key())
 
 
 # ─── CONNECTION CHECKS ────────────────────────────────────────────────────────
@@ -145,10 +116,6 @@ def run_preflight(port=PORT):
     report["ffmpeg_nvenc"] = check_ffmpeg_nvenc()
     report["numpy"] = check_numpy()
 
-    # API key
-    api_key = get_api_key()
-    report["api_key"] = api_key[:8] + "..."  # Show partial for confirmation
-
     # Verdict
     critical = ["port_free", "playwright", "ffmpeg_nvenc", "numpy"]
     success = all(report[k] for k in critical)
@@ -162,7 +129,6 @@ def run_preflight(port=PORT):
         print(f"  {icon} {k}: {v}")
     print("=" * 50)
     if success:
-        print(f"  API KEY: {api_key}")
         print(f"  GPUs: {report['gpu_count']}x T4")
         print("  STATUS: READY")
     else:

@@ -139,6 +139,16 @@ def _prep_page(browser, html_path, width, height, enhance):
         viewport={"width": width, "height": height},
         device_scale_factor=1
     )
+    # Freeze animations before the page's own document parses, so real
+    # wall-clock time during networkidle/font/image waits can never let a
+    # short-delay animation actually run and finish before capture starts.
+    page.add_init_script("""
+        (() => {
+            const s = document.createElement('style');
+            s.textContent = '*,*::before,*::after{animation-play-state:paused!important;animation-fill-mode:both!important}';
+            document.documentElement.appendChild(s);
+        })();
+    """)
     page.goto(f"file://{html_path}", wait_until="networkidle")
     try:
         page.wait_for_function("document.fonts.status === 'loaded'", timeout=15000)
@@ -201,12 +211,6 @@ def _prep_page(browser, html_path, width, height, enhance):
             print(f"[render] WARNING: {len(broken)} image(s) failed to load: {broken[:5]}", flush=True)
     except Exception:
         pass
-    page.evaluate("""() => {
-        const s = document.createElement('style');
-        s.textContent = '*,*::before,*::after{animation-play-state:paused!important;animation-fill-mode:both!important}';
-        document.head.appendChild(s);
-        window.__a = document.getAnimations();
-    }""")
     if enhance:
         page.evaluate("() => { document.documentElement.style.filter = 'saturate(1.18) contrast(1.12)'; }")
     return page
@@ -246,9 +250,15 @@ def _render_slice(html_path, width, height, enhance, clip, frames_dir, fps,
                         raise RenderError("CANCELLED")
                 try:
                     page.evaluate(
-                        f"window.__a.forEach(a => a.currentTime = {t_ms}); "
-                        f"if(window.__broll && window.__broll.seek) window.__broll.seek({t_ms}/1000); "
-                        f"void document.body.offsetHeight"
+                        """(t) => {
+                            if (window.__broll && window.__broll.seek) window.__broll.seek(t / 1000);
+                            for (const a of document.getAnimations()) {
+                                a.pause();
+                                a.currentTime = t;
+                            }
+                            void document.body.offsetHeight;
+                        }""",
+                        t_ms,
                     )
                     page.screenshot(
                         path=os.path.join(frames_dir, f"frame_{i:05d}.png"),

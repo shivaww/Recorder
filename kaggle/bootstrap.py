@@ -8,7 +8,7 @@ This script:
   2. Runs preflight checks
   3. Starts the render server
   4. Starts Cloudflare tunnel
-  5. Prints API KEY + BASE URL for the Android app
+  5. Prints BASE URL for the Android app
 """
 import subprocess
 import sys
@@ -103,7 +103,7 @@ def run_preflight_checks():
     sys.path.insert(0, REPO_DIR)
     os.chdir(REPO_DIR)
 
-    from preflight import run_preflight, get_api_key
+    from preflight import run_preflight
     from config import PORT
 
     success, report = run_preflight(PORT)
@@ -111,8 +111,7 @@ def run_preflight_checks():
         print("\n  PREFLIGHT FAILED. Fix issues above and re-run.")
         sys.exit(1)
 
-    api_key = get_api_key()
-    return api_key, PORT
+    return PORT
 
 
 def _stream(proc, prefix):
@@ -152,7 +151,7 @@ def start_tunnel(port):
     return proc
 
 
-def wait_for_url(cf_proc, api_key):
+def wait_for_url(cf_proc):
     step("STEP 5/5: Waiting for public URL")
     print("  Scanning tunnel output...")
 
@@ -178,10 +177,10 @@ if __name__ == "__main__":
 
     free_port(8000)
     install_deps()
-    api_key, port = run_preflight_checks()
+    port = run_preflight_checks()
     server_proc = start_server()
     cf_proc = start_tunnel(port)
-    url = wait_for_url(cf_proc, api_key)
+    url = wait_for_url(cf_proc)
 
     if url:
         try:
@@ -190,20 +189,29 @@ if __name__ == "__main__":
         except Exception:
             pass
         print("\n" + "="*60)
-        print("  READY — COPY THESE TWO VALUES INTO THE ANDROID APP")
+        print("  READY — COPY THIS INTO THE ANDROID APP")
         print("="*60)
-        spaced = " ".join(api_key[i:i + 4] for i in range(0, len(api_key), 4))
-        print(f"  API KEY  : {spaced}")
-        print(f"  (key is {len(api_key)} chars; spaces/newlines are optional, server ignores whitespace)")
         print(f"  BASE URL : {url}")
         print("="*60)
         print("\n  Server is running. Keep this cell alive.")
         print("  Press Ctrl+C or stop the cell to shut down.\n")
 
-        # Keep alive
+        # Keep alive — heartbeat every 30s so a dead session is visibly
+        # distinguishable from a live one (Kaggle leaves the last output on
+        # screen forever; without this, a dead corpse banner looks identical
+        # to a live one).
+        start_ts = time.time()
+        last_hb = 0.0
         try:
             while server_proc.poll() is None and cf_proc.poll() is None:
                 time.sleep(2)
+                now = time.time()
+                if now - last_hb >= 30:
+                    up = int(now - start_ts)
+                    print(f"  [alive] {time.strftime('%H:%M:%S')} "
+                          f"— uptime {up // 60}m{up % 60}s — URL still: {url}",
+                          flush=True)
+                    last_hb = now
         except KeyboardInterrupt:
             pass
         finally:

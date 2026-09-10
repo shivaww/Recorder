@@ -1680,14 +1680,12 @@ class MainActivity : Activity() {
         connCard.addView(displayTv("Connection", 13, TXT))
         connCard.addView(spacer(dp(6)))
         connCard.addView(bodyTv(
-            "Paste both values from the notebook READY block. The key changes every Kaggle session.",
+            "Paste the Base URL from the notebook READY block. It changes every Kaggle session.",
             11, TXT2))
         connCard.addView(spacer(dp(8)))
         val baseUrlInput = fieldEt("Base URL (Cloudflare tunnel)", securePrefs.baseUrl)
         connCard.addView(baseUrlInput)
         connCard.addView(spacer(dp(6)))
-        val apiKeyInput = fieldEt("API key", securePrefs.apiKey, secret = true)
-        connCard.addView(apiKeyInput)
         connCard.addView(spacer(dp(10)))
         val connStatus = bodyTv("", 11, TXT2)
         val connRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -1695,7 +1693,6 @@ class MainActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f)
             setOnClickListener {
                 securePrefs.baseUrl = baseUrlInput.text.toString().trim()
-                securePrefs.apiKey = apiKeyInput.text.toString().trim()
                 connStatus.text = "Saved on this device."
                 connStatus.setTextColor(TEAL)
             }
@@ -1705,12 +1702,11 @@ class MainActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f)
             setOnClickListener {
                 val url = baseUrlInput.text.toString().trim()
-                val key = apiKeyInput.text.toString().trim()
                 if (url.isEmpty()) { return@setOnClickListener }
                 connStatus.text = "Testing..."
                 connStatus.setTextColor(TXT2)
                 Thread {
-                    val api = RemoteApi(url, key)
+                    val api = RemoteApi(url)
                     val (ok, latency) = api.testConnection()
                     val err = api.lastError ?: ""
                     runOnUiThread {
@@ -1865,9 +1861,8 @@ class MainActivity : Activity() {
             return
         }
         val url = securePrefs.baseUrl
-        val key = securePrefs.apiKey
-        if (url.isEmpty() || key.isEmpty()) {
-            showErrorScreen("Missing Base URL or API Key")
+        if (url.isEmpty()) {
+            showErrorScreen("Missing Base URL")
             return
         }
         
@@ -1877,7 +1872,7 @@ class MainActivity : Activity() {
             uploadTv?.text = "Uploading..."
         }
         Thread {
-            val api = RemoteApi(url, key)
+            val api = RemoteApi(url)
             val resStr = "${resW}x${resH}"
             var successCount = 0
             
@@ -2055,8 +2050,7 @@ class MainActivity : Activity() {
         val job = synchronized(remoteJobs) { remoteJobs.getOrNull(idx) } ?: return
         Thread {
             val url = securePrefs.baseUrl
-            val key = securePrefs.apiKey
-            val api = RemoteApi(url, key)
+            val api = RemoteApi(url)
             
             val tempFile = File(cacheDir, "broll_${job.jobId}.mp4")
             val ok = api.downloadFile(job.jobId, tempFile) { pct, speedKbps ->
@@ -2136,7 +2130,7 @@ class MainActivity : Activity() {
         val job = synchronized(remoteJobs) { remoteJobs.getOrNull(idx) } ?: return
         showBusy("Cancelling...")
         Thread {
-            val api = RemoteApi(securePrefs.baseUrl, securePrefs.apiKey)
+            val api = RemoteApi(securePrefs.baseUrl)
             api.cancelJob(job.jobId)
             synchronized(remoteJobs) { 
                 remoteJobs[idx].state = "CANCELLED"
@@ -2149,7 +2143,7 @@ class MainActivity : Activity() {
     private fun startRemoteJob(jobId: String) {
         showBusy("Starting render...")
         Thread {
-            val api = RemoteApi(securePrefs.baseUrl, securePrefs.apiKey)
+            val api = RemoteApi(securePrefs.baseUrl)
             val ok = api.startJob(jobId)
             runOnUiThread {
                 if (ok) {
@@ -2183,9 +2177,8 @@ class MainActivity : Activity() {
             while (remotePolling) {
                 try {
                     val url = securePrefs.baseUrl
-                    val key = securePrefs.apiKey
-                    if (url.isNotEmpty() && key.isNotEmpty()) {
-                        val api = RemoteApi(url, key)
+                    if (url.isNotEmpty()) {
+                        val api = RemoteApi(url)
                         lastGpu = api.getGpuUsage()
                         var changed = false
                         val jobsCopy = synchronized(remoteJobs) { remoteJobs.toList() }

@@ -21,7 +21,7 @@ from config import (
     STATE_WAITING_START, STATE_RENDERING, STATE_ENCODING,
     STATE_DONE, STATE_FAILED, STATE_CANCELLED
 )
-from preflight import get_api_key, validate_key, run_preflight
+from preflight import run_preflight
 from validator import validate_html
 from renderer import render_frames, RenderError
 from sfx import mix_audio
@@ -223,14 +223,6 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _check_key(self):
-        # Auth removed by owner decision after five distinct key-copy failure
-        # modes (stale session, trailing whitespace, truncated wrap,
-        # whitespace-in-middle, mid-key glyph error). The tunnel URL is now
-        # the only secret: anyone holding it can submit renders on this
-        # quota, so keep it out of screenshots and shares.
-        return True
-
     def do_GET(self):
         print(f"[http-in] GET {self.path}", flush=True)
         try:
@@ -238,9 +230,6 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/health":
                 self._send_json(200, {"status": "OK", "gpus": NUM_GPUS})
-                return
-
-            if not self._check_key():
                 return
 
             parts = path.split("/")
@@ -296,9 +285,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
-            print(f"[http-raw] POST {self.path} key_present={self.headers.get('X-API-Key') is not None}", flush=True)
-            if not self._check_key():
-                return
+            print(f"[http-raw] POST {self.path}", flush=True)
             path = urlparse(self.path).path
             parts = path.split("/")
 
@@ -386,8 +373,6 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         try:
-            if not self._check_key():
-                return
             path = urlparse(self.path).path
             parts = path.split("/")
             if path.startswith("/jobs/") and len(parts) >= 3:

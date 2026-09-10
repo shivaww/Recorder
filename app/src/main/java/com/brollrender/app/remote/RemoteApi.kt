@@ -9,7 +9,7 @@ import java.net.URL
  * Network layer for Kaggle remote rendering.
  * Uses HttpURLConnection and manual multipart encoding.
  */
-class RemoteApi(private val baseUrl: String, private val apiKey: String) {
+class RemoteApi(private val baseUrl: String) {
 
     data class JobStatus(
         val state: String,
@@ -28,7 +28,6 @@ class RemoteApi(private val baseUrl: String, private val apiKey: String) {
             requestMethod = method
             connectTimeout = timeout
             readTimeout = timeout
-            setRequestProperty("X-API-Key", apiKey.trim())
             instanceFollowRedirects = true
         }
         return conn
