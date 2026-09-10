@@ -120,6 +120,7 @@ class MainActivity : Activity() {
     // REMOTE (Kaggle) state
     private lateinit var securePrefs: SecurePrefs
     private lateinit var jobStore: JobStore
+    private lateinit var blockStore: BlockStore
     private val remoteJobs = mutableListOf<JobStore.JobMeta>()
     @Volatile private var remotePolling = false
     private var remotePollThread: Thread? = null
@@ -144,11 +145,23 @@ class MainActivity : Activity() {
         engine.attachRoot(root)
         root.setBackgroundColor(VOID)
         setContentView(root)
-        // Purge block files orphaned by a previous session.
-        blockDir().deleteRecursively()
-        // Init remote render state
+        // Init remote render state + restore overnight queue from last session
         securePrefs = SecurePrefs(this)
         jobStore = JobStore(this)
+        blockStore = BlockStore(this)
+        val saved = blockStore.loadAll()
+        for (e in saved) {
+            val f = File(e.path)
+            if (f.exists()) blocks.add(Block(f, e.name))
+            val seqMatch = f.name.removePrefix("b").removeSuffix(".html").toIntOrNull()
+            if (seqMatch != null && seqMatch > blockSeq) blockSeq = seqMatch
+        }
+        // Purge any block files that are no longer in the saved queue
+        // (e.g. crash mid-batch left a staged file that was never recorded).
+        val keep = blocks.map { it.file.name }.toSet()
+        blockDir().listFiles()?.forEach { f ->
+            if (f.name !in keep) f.delete()
+        }
         remoteJobs.addAll(jobStore.loadAll())
         showPickScreen()
     }
@@ -261,6 +274,11 @@ class MainActivity : Activity() {
         val d = File(filesDir, "blocks")
         if (!d.exists()) d.mkdirs()
         return d
+    }
+
+    /** Persist the overnight queue (path + label) to SharedPreferences. */
+    private fun saveBlocks() {
+        blockStore.saveAll(blocks.map { BlockStore.BlockEntry(it.file.path, it.name) })
     }
 
     /** Monotonic file names: removing a queued block never collides. */
@@ -425,6 +443,7 @@ class MainActivity : Activity() {
                     setOnClickListener {
                         if (!batchRunning) {
                             blocks.removeAt(i)
+                            saveBlocks()
                             showQueueScreen()
                         }
                     }
@@ -464,6 +483,7 @@ class MainActivity : Activity() {
                         blocks.clear()
                         blockDir().deleteRecursively()
                         blockSeq = 0
+                        saveBlocks()
                         showQueueScreen()
                     }
                 }
@@ -654,6 +674,7 @@ class MainActivity : Activity() {
                 dest.writeText(text)
                 runOnUiThread {
                     blocks.add(Block(dest, "pasted (${text.length / 1024}KB)"))
+                    saveBlocks()
                     if (remoteQueuePick) showRemoteQueueScreen() else showQueueScreen()
                 }
             } catch (e: Exception) {
@@ -692,6 +713,7 @@ class MainActivity : Activity() {
                     } ?: throw RuntimeException("cannot open selected file")
                     runOnUiThread {
                         blocks.add(Block(dest, queryName(uri)))
+                        saveBlocks()
                         if (remoteQueuePick) showRemoteQueueScreen() else showQueueScreen()
                     }
                 } catch (e: Exception) {
@@ -1785,6 +1807,7 @@ class MainActivity : Activity() {
             row.addView(mkButton("Remove", danger = true).apply {
                 setOnClickListener {
                     blocks.removeAt(i)
+                    saveBlocks()
                     showRemoteQueueScreen()
                 }
             })
@@ -1821,6 +1844,7 @@ class MainActivity : Activity() {
                     blocks.clear()
                     blockDir().deleteRecursively()
                     blockSeq = 0
+                    saveBlocks()
                     showRemoteQueueScreen()
                 }
             })
@@ -1942,6 +1966,7 @@ class MainActivity : Activity() {
                     blocks.clear()
                     blockDir().deleteRecursively()
                     blockSeq = 0
+                    saveBlocks()
                     startRemotePolling()
                     showRemoteJobsScreen()
                 } else {
