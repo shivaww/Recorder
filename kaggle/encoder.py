@@ -49,6 +49,7 @@ def encode_video(frames_dir, output_path, fps, wav_path=None, gpu_id=0, bitrate=
         "-preset", "p7",
         "-tune", "hq",
         "-rc", "vbr",
+        "-cq", "14",
         "-b:v", str(bitrate),
         "-maxrate", str(int(bitrate * 1.25)),
         "-bufsize", str(bitrate * 2),
@@ -94,6 +95,7 @@ def encode_video(frames_dir, output_path, fps, wav_path=None, gpu_id=0, bitrate=
         "-maxrate", str(int(bitrate * 1.25)),
         "-bufsize", str(bitrate * 2),
         "-preset", "slow",
+        "-crf", "14",
         "-pix_fmt", "yuv420p",
         "-profile:v", "high",
     ]

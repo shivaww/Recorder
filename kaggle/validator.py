@@ -69,7 +69,9 @@ DURATION_JS = """() => {
             if (!ef || !ef.getTiming) continue;
             const t = ef.getTiming();
             const dur = (typeof t.duration === 'number') ? t.duration : 0;
-            const it = (typeof t.iterations === 'number' && isFinite(t.iterations)) ? t.iterations : 1;
+            const iterRaw = t.iterations;
+            if (typeof iterRaw === 'number' && !isFinite(iterRaw)) continue;
+            const it = (typeof iterRaw === 'number') ? iterRaw : 1;
             const end = (t.delay || 0) + dur * it;
             if (isFinite(end) && end > maxEnd) maxEnd = end;
         } catch (e) {}
