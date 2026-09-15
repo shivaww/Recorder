@@ -41,9 +41,10 @@ if python -c "import torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)
 else
   note "WARNING: no CUDA GPU - generation will be very slow on CPU"
 fi
-python -m pip install -q flash-attn --no-build-isolation 2>/dev/null \
-  && note "flash-attn installed" \
-  || note "flash-attn skipped (optional)"
+# flash-attn intentionally NOT installed: building it from source eats
+# ~30GB CPU RAM for 30-90 min and the tested T4 config runs the PyTorch
+# attention fallback ("manual PyTorch version") just fine.
+note "flash-attn skipped (T4 uses the tested PyTorch attention path)"
 
 step "STEP 2/5: Freeing port $PORT"
 fuser -k "${PORT}/tcp" 2>/dev/null
