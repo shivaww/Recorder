@@ -1,13 +1,13 @@
 # PROMPT_SPEC — app-side companion to GENERATION_PROMPT
 
 The generation prompt (SRT + VIDEO_TYPE + the motion-graphics contract) is the
-source of truth for the HTML. This file documents what BrollRender does with
+source of truth for the HTML. This file documents what Nexon Studio does with
 that output.
 
 ## The closed loop
 
 SRT (renamed .txt) + VIDEO_TYPE + prompt → AI emits one self-contained HTML
-(beat table, manifest, file) → BrollRender: PICK (or PASTE HTML) → PREVIEW →
+(beat table, manifest, file) → Nexon Studio: PICK (or PASTE HTML) → PREVIEW →
 RENDER → DONE. No screen recording, no editor crop, no resampling blur.
 
 ## Two page modes

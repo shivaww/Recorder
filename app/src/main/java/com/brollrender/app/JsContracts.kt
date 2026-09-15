@@ -1,7 +1,7 @@
 package com.brollrender.app
 
 /**
- * JS contracts for the BrollRender engine.
+ * JS contracts for the Nexon Studio engine.
  *
  * Two page modes:
  *  - CSS-only: all motion via CSS keyframes, scrubbed by document.getAnimations()

@@ -293,7 +293,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
         }
-        col.addView(displayTv("Brollrender", 28, AMBER))
+        col.addView(displayTv("Nexon Studio", 28, AMBER))
         col.addView(spacer(dp(4)))
         col.addView(bodyTv(
             "Turn HTML motion clips into exact 16:9 MP4s — rendered on this phone or on the Kaggle farm.",
@@ -357,6 +357,16 @@ class MainActivity : Activity() {
                 dp(48)
             )
             setOnClickListener { downloadGenerationPrompt(this) }
+        })
+        col.addView(spacer(dp(8)))
+        col.addView(mkButton("Voice studio (Qwen3-TTS)").apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(48)
+            )
+            setOnClickListener {
+                startActivity(android.content.Intent(this@MainActivity, VoiceActivity::class.java))
+            }
         })
         col.addView(spacer(dp(28)))
 
@@ -1487,16 +1497,16 @@ class MainActivity : Activity() {
 
     /**
      * MediaStore export with the IS_PENDING pattern. frame0.png goes to
-     * Pictures/BrollRender (MediaStore forbids images under Movies/).
+     * Pictures/NexonStudio (MediaStore forbids images under Movies/).
      */
     private fun exportToMediaStore(firstFrame: Bitmap, tempFile: File): Uri? {
         val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
             .format(java.util.Date())
-        val vName = "BrollRender_$stamp.mp4"
+        val vName = "NexonStudio_$stamp.mp4"
         val vValues = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, vName)
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-            put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/BrollRender")
+            put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/NexonStudio")
             put(MediaStore.Video.Media.IS_PENDING, 1)
         }
         val uri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, vValues)
@@ -1508,9 +1518,9 @@ class MainActivity : Activity() {
 
             // frame0.png QC export (acceptance 4: eyeball first-frame match).
             val pValues = ContentValues().apply {
-                put(MediaStore.Images.Media.DISPLAY_NAME, "BrollRender_${stamp}_frame0.png")
+                put(MediaStore.Images.Media.DISPLAY_NAME, "NexonStudio_${stamp}_frame0.png")
                 put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/BrollRender")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/NexonStudio")
                 put(MediaStore.Images.Media.IS_PENDING, 1)
             }
             val pngUri = contentResolver.insert(
@@ -1616,7 +1626,7 @@ class MainActivity : Activity() {
         inner.addView(monoTv("size      ${fmtSize(size)}", 12, TXT2))
         inner.addView(monoTv("duration  ${String.format(Locale.US, "%.1f", durMs / 1000.0)} s", 12, TXT2))
         inner.addView(monoTv("video     ${vw}x${vh}", 12, TXT2))
-        inner.addView(monoTv("frame0.png saved for QC (Pictures/BrollRender)", 11, TXT2))
+        inner.addView(monoTv("frame0.png saved for QC (Pictures/NexonStudio)", 11, TXT2))
         inner.addView(spacer(dp(8)))
         inner.addView(
             if (verified) monoTv("VERIFIED ${vw}x${vh} - pixel-exact", 12, TEAL, true)
@@ -2261,11 +2271,11 @@ class MainActivity : Activity() {
 
     private fun exportTempToMediaStore(tempFile: File, name: String): Uri? {
         val stamp = System.currentTimeMillis()
-        val displayName = "BrollRender_${stamp}.mp4"
+        val displayName = "NexonStudio_${stamp}.mp4"
         val vValues = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, displayName)
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-            put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/BrollRender")
+            put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/NexonStudio")
             put(MediaStore.Video.Media.IS_PENDING, 1)
         }
         val uri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, vValues) ?: return null

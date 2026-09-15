@@ -17,6 +17,7 @@ class SecurePrefs(context: Context) {
     companion object {
         private const val KEY_ALIAS = "broll_remote_key"
         private const val PREF_BASE_URL = "base_url"
+        private const val PREF_VOICE_BASE_URL = "voice_base_url"
         private const val GCM_IV_LENGTH = 12
         private const val GCM_TAG_LENGTH = 128
     }
@@ -69,4 +70,9 @@ class SecurePrefs(context: Context) {
     var baseUrl: String
         get() = if (prefs.contains(PREF_BASE_URL)) decrypt(prefs.getString(PREF_BASE_URL, "")!!) else ""
         set(value) = prefs.edit().putString(PREF_BASE_URL, encrypt(value)).apply()
+
+    /** Voice studio server (Qwen3-TTS) — separate URL, same encrypted store. */
+    var voiceBaseUrl: String
+        get() = if (prefs.contains(PREF_VOICE_BASE_URL)) decrypt(prefs.getString(PREF_VOICE_BASE_URL, "")!!) else ""
+        set(value) = prefs.edit().putString(PREF_VOICE_BASE_URL, encrypt(value)).apply()
 }

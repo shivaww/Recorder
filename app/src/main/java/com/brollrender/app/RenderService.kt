@@ -63,7 +63,7 @@ class RenderService : Service() {
             startForeground(NOTE_ID, n)
         }
         wake = (getSystemService(Context.POWER_SERVICE) as PowerManager)
-            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BrollRender:batch")
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "NexonStudio:batch")
             .also { it.acquire() } // no timeout by design: hours-long batch
         return START_NOT_STICKY
     }

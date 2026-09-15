@@ -6,12 +6,12 @@ Run against any HTML file (conforming files auto-detect the frame; non-conformin
 
 | # | Test | Result (PASS / FAIL / BLOCKED) | Evidence (what you saw) |
 |---|------|-------------------------------|-------------------------|
-| 1 | 1080p30 render: DONE screen shows 1920x1080 VERIFIED, duration ~ expected, file present in Movies/BrollRender | | |
+| 1 | 1080p30 render: DONE screen shows 1920x1080 VERIFIED, duration ~ expected, file present in Movies/NexonStudio | | |
 | 2 | Frame at t = 16.2 s shows the large amber "CHEATING?" word (broll1.html only - proves the animation clock is frame-accurate; BLOCKED without that fixture) | | |
 | 3 | First 3 s of the MP4 contain no corner-guide brackets and no hatched margins (headless mode works) | | |
 | 4 | Zero black bars; frame0.png matches the first MP4 frame - also with ENHANCE ON (grade applied to both) | | |
 | 5 | Draft (720p24) completes at least 2x faster than Final | | |
-| 6 | CANCEL mid-render leaves no partial file in Movies/BrollRender; an immediate second render works | | |
+| 6 | CANCEL mid-render leaves no partial file in Movies/NexonStudio; an immediate second render works | | |
 | 7 | Second render of the same HTML uses zero network (fonts from WebView cache - check airplane mode) | | |
 | 8 | Broken HTML (no `.fit`): lands on PREVIEW with the detection note + MANUAL framing defaulted (AUTO-FITTED) - renders successfully, no crash | | |
 

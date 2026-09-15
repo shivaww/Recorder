@@ -1571,14 +1571,14 @@ class RenderEngine(private val activity: Activity) {
         return dg >= 0.75 * dr
     }
 
-    /** Dump a probe frame for eyeball comparison (Pictures/BrollRender) when
+    /** Dump a probe frame for eyeball comparison (Pictures/NexonStudio) when
      *  the fast path is rejected - real pixels beat theorizing about why. */
     private fun dumpProbePng(tag: String, bmp: Bitmap) {
         try {
             val cv = ContentValues().apply {
-                put(MediaStore.Images.Media.DISPLAY_NAME, "BrollRender_$tag.png")
+                put(MediaStore.Images.Media.DISPLAY_NAME, "NexonStudio_$tag.png")
                 put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/BrollRender")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/NexonStudio")
             }
             val uri = activity.contentResolver
                 .insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cv) ?: return

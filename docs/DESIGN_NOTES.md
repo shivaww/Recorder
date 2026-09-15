@@ -1,4 +1,4 @@
-# DESIGN NOTES — BrollRender Android console
+# DESIGN NOTES — Nexon Studio Android console
 
 Pass 1: "mission-control console" — a pocket console for a remote GPU render farm.
 Identity kept from the pre-design app: mono telemetry, amber on black, teal progress.

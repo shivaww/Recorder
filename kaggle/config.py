@@ -1,4 +1,4 @@
-"""config.py — Shared constants for all BrollRender Kaggle modules."""
+"""config.py — Shared constants for all Nexon Studio Kaggle modules."""
 import os
 import subprocess
 

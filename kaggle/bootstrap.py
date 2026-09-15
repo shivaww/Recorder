@@ -122,7 +122,7 @@ def _stream(proc, prefix):
 
 
 def start_server():
-    step("STEP 3/5: Starting BrollRender server")
+    step("STEP 3/5: Starting Nexon Studio server")
     proc = subprocess.Popen(
         [sys.executable, "-u", "main.py"],
         cwd=REPO_DIR,
@@ -172,7 +172,7 @@ def wait_for_url(cf_proc):
 
 if __name__ == "__main__":
     print("\n" + "#"*50)
-    print("#  BROLLRENDER KAGGLE BOOTSTRAP")
+    print("#  NEXON STUDIO KAGGLE BOOTSTRAP")
     print("#"*50)
 
     free_port(8000)

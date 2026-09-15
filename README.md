@@ -1,4 +1,4 @@
-# BrollRender
+# Nexon Studio
 
 Single-Activity Android app: pick a self-contained HTML animation (CSS keyframes, no JS logic) -> render it offscreen, frame-by-frame -> pixel-exact 16:9 MP4 (480p/720p/1080p, 24/30/60 fps). Zero third-party dependencies. No screen capture, no ffmpeg, no network needed after the first render.
 
@@ -15,7 +15,7 @@ The repo commits `debug.keystore`, so every rebuild is signed identically and in
 3. **RENDER** - progress bar with `frame N/T - r f/s - ETA`; CANCEL aborts cleanly (encoder released, partial file deleted).
 4. **DONE** - file card read back with MediaMetadataRetriever: name, size, duration, resolution, VERIFIED/MISMATCH line. OPEN / SHARE / RENDER ANOTHER.
 
-Output lands in `Movies/BrollRender/BrollRender_<stamp>.mp4`, with `Pictures/BrollRender/<stamp>_frame0.png` for eyeball QC (MediaStore forbids images under Movies/).
+Output lands in `Movies/NexonStudio/NexonStudio_<stamp>.mp4`, with `Pictures/NexonStudio/<stamp>_frame0.png` for eyeball QC (MediaStore forbids images under Movies/).
 
 ## Manual framing - no quality loss
 
@@ -38,3 +38,15 @@ A color grade (contrast ~1.12 around mid-gray + saturation 1.18) applied as a ro
 - Never captures the screen: offscreen WebView, hardware layer, drawn manually per frame - GPU-direct into the encoder surface when a per-render probe validates it, CPU readback fallback otherwise.
 - Never upscales: AUTO framing must match the target within 2 px or fall back to manual; manual zoom/crop re-rasterizes the page instead of resampling pixels.
 - Corner detection is DOM geometry (the page reports its own rect), never vision.
+
+## Voice studio (Qwen3-TTS)
+
+In-app voice generation on a Kaggle GPU notebook — same one-command pattern as the render farm:
+
+1. New Kaggle notebook, Accelerator = GPU (T4 x2).
+2. In the app: Voice studio → Start the voice server → Copy command, paste it into a Kaggle cell and run. It installs everything (flask, qwen-tts, cloudflared), starts the server plus a Cloudflare tunnel, and prints a BASE URL in a READY block.
+3. Paste the BASE URL into Voice studio → Connection, save, test.
+4. Three modes: **Custom** (9 preset speakers + instruct for tone/emotion), **Clone** (3–15 s reference audio + its exact transcript), **Design** (describe the voice in natural language). Paste the script — `{here complete voice over}` marks narration start — and generate.
+5. The finished WAV lands in `Music/NexonStudio/` with play/share buttons.
+
+Server files live in `voice/` (`run.sh` one-command launcher + `server.py`); Qwen3-TTS models lazy-load per mode on first request. Re-running the cell is safe: it kills the old server/tunnel and starts fresh.

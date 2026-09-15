@@ -1,4 +1,4 @@
-"""main.py — BrollRender Kaggle Server orchestrator.
+"""main.py — Nexon Studio Kaggle Server orchestrator.
 
 Imports all modules and runs the HTTP server.
 Job flow: UPLOADED -> VALIDATED -> WAITING_START -> RENDERING -> ENCODING -> DONE

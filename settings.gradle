@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "BrollRender"
+rootProject.name = "NexonStudio"
 include ':app'
