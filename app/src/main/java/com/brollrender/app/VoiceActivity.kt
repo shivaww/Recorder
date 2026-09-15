@@ -186,11 +186,10 @@ class VoiceActivity : Activity() {
             addView(control)
         }
 
-    private fun spinner(options: List<String>): Spinner =
-        Spinner(this).apply {
-            adapter = object : ArrayAdapter<String>(
-                this@VoiceActivity, android.R.layout.simple_spinner_item, options
-            ) {
+    private fun spinner(options: List<String>): Spinner {
+        val adp = object : ArrayAdapter<String>(
+            this@VoiceActivity, android.R.layout.simple_spinner_item, options
+        ) {
                 override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
                     val v = super.getView(position, convertView, parent)
                     (v as? TextView)?.apply {
@@ -200,11 +199,14 @@ class VoiceActivity : Activity() {
                     }
                     return v
                 }
-            }
-            dropDownViewResource = android.R.layout.simple_spinner_dropdown_item
+        }
+        adp.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        return Spinner(this).apply {
+            adapter = adp
             background = Console.panelBg(context)
             setPadding(dp(10), dp(6), dp(10), dp(6))
         }
+    }
 
     // ---------------- main screen ----------------
 

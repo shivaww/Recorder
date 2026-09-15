@@ -48,7 +48,6 @@ class VoiceApi(private val baseUrl: String) {
             false to -1L
         }
     }
-}
 
     /**
      * POST /generate — fields mirror the tested tmp/qwen.html client exactly.
