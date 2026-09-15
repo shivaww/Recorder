@@ -137,14 +137,21 @@ def chunk_text(text: str, max_chars: int = MAX_CHUNK_CHARS):
     return chunks or [text]
 
 
-def generate_one(model, mode, text, language, speaker, instruct, ref_audio, ref_text, design_prompt):
+def generate_one(model, mode, text, language, speaker, instruct, ref_audio, ref_text, design_prompt, speed=1.0):
     language = language or "Auto"
 
     if mode == "custom":
         kwargs = {"text": text, "language": language, "speaker": speaker or "Ryan"}
         if instruct and instruct.strip():
             kwargs["instruct"] = instruct.strip()
-        wavs, sr = model.generate_custom_voice(**kwargs)
+        if speed and abs(speed - 1.0) > 1e-6:
+            kwargs["speed"] = speed
+        try:
+            wavs, sr = model.generate_custom_voice(**kwargs)
+        except TypeError:
+            # qwen-tts build without the speed kwarg: retry without it.
+            kwargs.pop("speed", None)
+            wavs, sr = model.generate_custom_voice(**kwargs)
 
     elif mode == "clone":
         if not ref_audio or not os.path.isfile(ref_audio):
@@ -174,7 +181,7 @@ def generate_one(model, mode, text, language, speaker, instruct, ref_audio, ref_
     return audio, sr
 
 
-def synthesize(mode, text, language, speaker, instruct, ref_audio, ref_text, design_prompt, job_id):
+def synthesize(mode, text, language, speaker, instruct, ref_audio, ref_text, design_prompt, job_id, speed=1.0, loudness=1.0):
     model = get_model(mode)
     vo_text = extract_vo(text)
     chunks = chunk_text(vo_text)
@@ -185,13 +192,15 @@ def synthesize(mode, text, language, speaker, instruct, ref_audio, ref_text, des
         print(f"[{job_id}] {mode} chunk {i+1}/{len(chunks)}: {chunk[:55]}...")
         wav, sr = generate_one(
             model, mode, chunk, language, speaker, instruct,
-            ref_audio, ref_text, design_prompt
+            ref_audio, ref_text, design_prompt, speed
         )
         pieces.append(wav)
         if i < len(chunks) - 1:
             pieces.append(torch.zeros(int(sr * 0.22)))
 
     full = torch.cat(pieces, dim=0).unsqueeze(0)
+    if loudness and abs(loudness - 1.0) > 1e-6:
+        full = (full * loudness).clamp(-1.0, 1.0)
     out_path = os.path.join(OUT_DIR, f"{job_id}.wav")
     torchaudio.save(out_path, full, sr)
     return out_path, full.shape[1] / sr
@@ -232,11 +241,34 @@ def generate():
     design_prompt = request.form.get("design_prompt", "").strip()
     ref_text = request.form.get("ref_text", "").strip()
 
+    def _num(name, lo, hi, default):
+        try:
+            v = float(request.form.get(name, default))
+        except (TypeError, ValueError):
+            v = default
+        return min(max(v, lo), hi)
+
+    speed = _num("speed", 0.5, 2.0, 1.0)
+    loudness = _num("loudness", 0.3, 2.5, 1.0)
+
     # Save reference audio for clone mode
     ref_path = None
     if mode == "clone" and "ref_audio" in request.files and request.files["ref_audio"].filename:
         ref_path = os.path.join(OUT_DIR, f"ref_{uuid.uuid4().hex[:8]}.wav")
         request.files["ref_audio"].save(ref_path)
+        # Normalize the reference: decode via soundfile, force mono, keep only
+        # the first 15 seconds, rewrite as WAV. Any decodable upload format
+        # (wav/mp3/flac/ogg) becomes clean model input.
+        try:
+            data, sr = sf.read(ref_path, always_2d=True)
+            if data.shape[1] > 1:
+                data = data[:, :1]
+            max_len = int(sr * 15)
+            if len(data) > max_len:
+                data = data[:max_len]
+            sf.write(ref_path, data, sr)
+        except Exception as e:
+            return jsonify(error=f"cannot read reference audio ({e})"), 400
 
     job_id = uuid.uuid4().hex[:12]
     JOBS[job_id] = {"status": "processing", "path": None, "duration": None, "error": None}
@@ -245,7 +277,7 @@ def generate():
         try:
             path, duration = synthesize(
                 mode, text, language, speaker, instruct,
-                ref_path, ref_text, design_prompt, job_id
+                ref_path, ref_text, design_prompt, job_id, speed, loudness
             )
             JOBS[job_id].update(status="done", path=path, duration=round(duration, 2))
             print(f"[{job_id}] done ({duration:.1f}s)")

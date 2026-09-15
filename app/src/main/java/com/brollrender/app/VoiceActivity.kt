@@ -7,6 +7,8 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.media.MediaPlayer
+import android.media.MediaRecorder
 import android.os.Bundle
 import android.provider.MediaStore
 import android.provider.OpenableColumns
@@ -42,6 +44,11 @@ class VoiceActivity : Activity() {
         private const val RED = Console.ALERT
         private const val TEAL = Console.TEAL
         private const val REQ_REF_AUDIO = 11
+        private const val REQ_PERM_MIC = 12
+
+        /** The paragraph the user reads aloud for voice cloning. Sent to the
+         *  server as the reference transcript — always English. */
+        val CLONE_SCRIPT = "Hello, and welcome. I\u2019m here to help you turn your ideas into clear, natural, and confident conversations. Whether you\u2019re exploring something exciting, explaining a complex thought, or simply enjoying a quiet moment, I\u2019ll keep my voice warm, steady, and easy to follow. Listen to the subtle changes in rhythm, emphasis, and expression as each sentence flows naturally into the next."
 
         /** One command that boots the voice server on a Kaggle GPU notebook. */
         const val BOOTSTRAP_CMD =
@@ -58,15 +65,10 @@ class VoiceActivity : Activity() {
     private var textInput: EditText? = null
     private var instructInput: EditText? = null
     private var designInput: EditText? = null
-    private var refTextInput: EditText? = null
     private var speakerSp: Spinner? = null
     private var customLangSp: Spinner? = null
     private var cloneLangSp: Spinner? = null
     private var designLangSp: Spinner? = null
-    private var refNameTv: TextView? = null
-    private var refAudioUri: Uri? = null
-    private var refAudioName = ""
-
     // One panel per mode — visibility-toggled so typed input survives switches.
     private var customPanel: LinearLayout? = null
     private var clonePanel: LinearLayout? = null
@@ -76,13 +78,43 @@ class VoiceActivity : Activity() {
     private var generateBtn: Button? = null
     private var statusTv: TextView? = null
 
+    // Output settings (persisted in nexon_voice_settings).
+    private var speed = 1.0
+    private var loudness = 1.0
+
+    // Speaker preview playback.
+    private var previewMp: MediaPlayer? = null
+
+    // Saved clone voices + current selection.
+    private lateinit var voiceStore: VoiceStore
+    private var savedVoices: MutableList<VoiceStore.Voice> = mutableListOf()
+    private var selectedVoice: VoiceStore.Voice? = null
+    private var voiceListHost: LinearLayout? = null
+
+    // Microphone recording.
+    private var recThread: Thread? = null
+    private var recording = false
+    @Volatile private var recCancelled = false
+
     @Volatile private var generating = false
     @Volatile private var voiceCancel = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         securePrefs = SecurePrefs(this)
+        voiceStore = VoiceStore(this)
+        savedVoices = voiceStore.list()
+        val settings = getSharedPreferences("nexon_voice_settings", MODE_PRIVATE)
+        speed = settings.getFloat("speed", 1.0f).toDouble()
+        loudness = settings.getFloat("loudness", 1.0f).toDouble()
         showMainScreen()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        previewMp?.release()
+        previewMp = null
+        stopRecorder()
     }
 
     // ---------------- ui plumbing ----------------
@@ -215,7 +247,6 @@ class VoiceActivity : Activity() {
         val prevScript = textInput?.text?.toString().orEmpty()
         val prevInstruct = instructInput?.text?.toString().orEmpty()
         val prevDesign = designInput?.text?.toString().orEmpty()
-        val prevRefText = refTextInput?.text?.toString().orEmpty()
 
         val pad = dp(20)
         val col = LinearLayout(this).apply {
@@ -235,7 +266,6 @@ class VoiceActivity : Activity() {
         buildModeArea(col)
         instructInput?.setText(prevInstruct)
         designInput?.setText(prevDesign)
-        refTextInput?.setText(prevRefText)
         col.addView(spacer(dp(14)))
         buildScriptArea(col)
         textInput?.setText(prevScript)
@@ -377,6 +407,11 @@ class VoiceActivity : Activity() {
                 "Ono_Anna", "Sohee", "Eric", "Dylan")
         )
         p.addView(labelRow("Speaker", speakerSp!!))
+        val prevBtn = mkButton("Listen to this voice")
+        prevBtn.layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, dp(40))
+        prevBtn.setOnClickListener { previewSpeaker() }
+        p.addView(prevBtn)
         p.addView(spacer(dp(10)))
         customLangSp = spinner(
             listOf("English", "Chinese", "Japanese", "Korean", "German", "French",
@@ -391,19 +426,15 @@ class VoiceActivity : Activity() {
 
     private fun buildClonePanel(): LinearLayout {
         val p = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val pick = mkButton("Pick reference audio (3-15 s)", filled = true)
-        pick.layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, dp(46))
-        pick.setOnClickListener { pickRefAudio() }
-        p.addView(pick)
-        refNameTv = monoTv(
-            if (refAudioName.isNotBlank()) refAudioName else "no audio picked yet",
-            11, TXT2)
-        p.addView(refNameTv)
+        voiceListHost = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        p.addView(voiceListHost!!)
+        refreshSavedVoices()
         p.addView(spacer(dp(10)))
-        refTextInput = fieldEt(
-            "Reference transcript — the exact words spoken in the audio", "", multi = true)
-        p.addView(refTextInput)
+        val add = mkButton("Add my voice (record or pick)", filled = true)
+        add.layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, dp(46))
+        add.setOnClickListener { showCloneSetupScreen() }
+        p.addView(add)
         p.addView(spacer(dp(10)))
         cloneLangSp = spinner(listOf("English", "Chinese", "Japanese", "Korean", "Auto"))
         p.addView(labelRow("Language", cloneLangSp!!))
@@ -432,6 +463,8 @@ class VoiceActivity : Activity() {
             "", multi = true)
         col.addView(textInput)
         col.addView(spacer(dp(14)))
+        buildSettingsCard(col)
+        col.addView(spacer(dp(14)))
         generateBtn = mkButton("Generate voice", filled = true).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(52))
@@ -453,9 +486,15 @@ class VoiceActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQ_REF_AUDIO && resultCode == RESULT_OK) {
             val uri = data?.data ?: return
-            refAudioUri = uri
-            refAudioName = queryName(uri)
-            refNameTv?.text = if (refAudioName.isNotBlank()) refAudioName else "audio selected"
+            val tmp = File(cacheDir, "picked_ref.wav")
+            try {
+                contentResolver.openInputStream(uri)?.use { input ->
+                    tmp.outputStream().use { input.copyTo(it) }
+                } ?: throw RuntimeException("cannot open the picked file")
+                askNameAndSave(tmp)
+            } catch (e: Exception) {
+                status("cannot read picked audio: ${e.message}", RED)
+            }
         }
     }
 
@@ -466,6 +505,151 @@ class VoiceActivity : Activity() {
         } ?: ""
     } catch (_: Exception) {
         ""
+    }
+
+    // ---------------- output settings (speed / loudness) ----------------
+
+    /** One slider row: label, SeekBar, live value label. Returns (row, valueTv). */
+    private fun sliderRow(
+        label: String, lo: Double, hi: Double, cur: Double, onChange: (Double) -> Unit
+    ): Pair<View, TextView> {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        row.addView(monoTv(label, 12, TXT2).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(76), ViewGroup.LayoutParams.WRAP_CONTENT)
+        })
+        val tv = monoTv(fmt2(cur), 12, TXT)
+        val bar = android.widget.SeekBar(this).apply {
+            max = 100
+            progress = ((cur - lo) / (hi - lo) * 100).roundToInt().coerceIn(0, 100)
+            setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(
+                    sb: android.widget.SeekBar?, p: Int, fromUser: Boolean
+                ) {
+                    val v = lo + (hi - lo) * p / 100.0
+                    tv.text = fmt2(v)
+                    onChange(v)
+                }
+                override fun onStartTrackingTouch(sb: android.widget.SeekBar?) {}
+                override fun onStopTrackingTouch(sb: android.widget.SeekBar?) { persistSettings() }
+            })
+        }
+        row.addView(bar, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(tv, LinearLayout.LayoutParams(dp(52), ViewGroup.LayoutParams.WRAP_CONTENT))
+        return row to tv
+    }
+
+    private fun fmt2(v: Double): String =
+        String.format(java.util.Locale.US, "%.2f", v)
+
+    private fun persistSettings() {
+        getSharedPreferences("nexon_voice_settings", MODE_PRIVATE).edit()
+            .putFloat("speed", speed.toFloat())
+            .putFloat("loudness", loudness.toFloat())
+            .apply()
+    }
+
+    private fun buildSettingsCard(col: LinearLayout) {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = Console.panelBg(context)
+            setPadding(dp(14), dp(12), dp(14), dp(14))
+        }
+        card.addView(displayTv("Output settings", 13, TXT))
+        card.addView(spacer(dp(8)))
+        val s = sliderRow("Speed", 0.5, 2.0, speed) { v -> speed = v }
+        card.addView(s.first)
+        card.addView(spacer(dp(6)))
+        val l = sliderRow("Loudness", 0.3, 2.5, loudness) { v -> loudness = v }
+        card.addView(l.first)
+        card.addView(spacer(dp(10)))
+        card.addView(mkButton("Set defaults (1.00 / 1.00)").apply {
+            setOnClickListener {
+                speed = 1.0
+                loudness = 1.0
+                persistSettings()
+                showMainScreen()
+            }
+        })
+        col.addView(card, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    }
+
+    // ---------------- preview playback ----------------
+
+    /** Play a bundled speaker preview from assets (copied to cache first so
+     *  playback works regardless of APK asset compression). */
+    private fun previewSpeaker() {
+        val name = speakerSp?.selectedItem as? String ?: return
+        try {
+            val cache = File(cacheDir, "preview_$name.wav")
+            if (!cache.exists() || cache.length() == 0L) {
+                assets.open("audio/$name.wav").use { input ->
+                    cache.outputStream().use { input.copyTo(it) }
+                }
+            }
+            playFile(cache)
+        } catch (_: Exception) {
+            status("no preview bundled for $name", RED)
+        }
+    }
+
+    private fun playFile(f: File) {
+        try {
+            previewMp?.release()
+            previewMp = MediaPlayer().apply {
+                setDataSource(f.absolutePath)
+                prepare()
+                start()
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    // ---------------- saved clone voices ----------------
+
+    /** Rows for each saved voice: preview / use / delete. */
+    private fun refreshSavedVoices() {
+        val host = voiceListHost ?: return
+        host.removeAllViews()
+        if (savedVoices.isEmpty()) {
+            host.addView(bodyTv(
+                "No saved voices yet — record your voice once and it stays saved on this phone.",
+                11, TXT2))
+            return
+        }
+        host.addView(displayTv("Saved voices", 12, TXT))
+        host.addView(spacer(dp(6)))
+        savedVoices.forEach { v ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = Console.panelBg(context)
+                setPadding(dp(10), dp(6), dp(6), dp(6))
+            }
+            row.addView(monoTv(v.name, 12, TXT).apply {
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            row.addView(mkButton("Play").apply { setOnClickListener { playFile(v.file) } })
+            row.addView(mkButton(if (selectedVoice?.id == v.id) "Using" else "Use").apply {
+                setOnClickListener {
+                    selectedVoice = v
+                    refreshSavedVoices()
+                }
+            })
+            row.addView(mkButton("X", danger = true).apply {
+                setOnClickListener {
+                    voiceStore.remove(v.id)
+                    savedVoices = voiceStore.list()
+                    if (selectedVoice?.id == v.id) selectedVoice = null
+                    refreshSavedVoices()
+                }
+            })
+            host.addView(row)
+            host.addView(spacer(dp(6)))
+        }
     }
 
     // ---------------- generation ----------------
@@ -487,13 +671,10 @@ class VoiceActivity : Activity() {
         var refText = ""
         when (mode) {
             "clone" -> {
-                if (refAudioUri == null) {
-                    status("pick a reference audio first", RED); return
+                if (selectedVoice == null) {
+                    status("add or select a saved voice first", RED); return
                 }
-                refText = refTextInput?.text.toString().trim()
-                if (refText.isEmpty()) {
-                    status("type the exact transcript of the reference audio", RED); return
-                }
+                refText = CLONE_SCRIPT
                 language = cloneLangSp?.selectedItem as? String ?: "English"
             }
             "design" -> {
@@ -516,8 +697,192 @@ class VoiceActivity : Activity() {
         val instruct = instructInput?.text.toString()
         Thread {
             runVoiceJob(base, script, finalMode, language, speakerSel,
-                instruct, designPrompt, refText)
+                instruct, designPrompt, refText, speed, loudness)
         }.start()
+    }
+
+    // ---------------- clone setup screen (record / pick) ----------------
+
+    private fun showCloneSetupScreen() {
+        val pad = dp(20)
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad)
+        }
+        col.addView(displayTv("Add my voice", 24, AMBER))
+        col.addView(spacer(dp(6)))
+        col.addView(bodyTv(
+            "Record in a quiet place, in exactly your own tone and style. " +
+                "Read the text below out loud exactly as written — no need to finish the whole " +
+                "paragraph, the first 15 seconds are enough, and no need to rush. Read at your " +
+                "comfortable pace.",
+            13, TXT2))
+        col.addView(spacer(dp(12)))
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = Console.panelBg(context)
+            setPadding(dp(14), dp(12), dp(14), dp(14))
+        }
+        card.addView(displayTv("Read aloud", 12, TXT))
+        card.addView(spacer(dp(6)))
+        card.addView(bodyTv(CLONE_SCRIPT, 13, TXT))
+        col.addView(card, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        col.addView(spacer(dp(14)))
+        val recBtn = mkButton("Record my voice", filled = true).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52))
+            setOnClickListener { startRecording(this) }
+        }
+        col.addView(recBtn)
+        col.addView(spacer(dp(8)))
+        col.addView(mkButton("Pick an audio file instead").apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48))
+            setOnClickListener { pickRefAudio() }
+        })
+        col.addView(spacer(dp(8)))
+        statusTv = bodyTv("", 11, TXT2)
+        col.addView(statusTv)
+        col.addView(spacer(dp(18)))
+        col.addView(mkButton("Back to voice studio").apply {
+            setOnClickListener { showMainScreen() }
+        })
+        setContentView(ScrollView(this).apply { addView(col) })
+    }
+
+    // ---------------- microphone recording (AudioRecord -> WAV) ----------------
+
+    private fun startRecording(btn: Button) {
+        if (recording) { recCancelled = true; return }
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+            != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), REQ_PERM_MIC)
+            return
+        }
+        val f = File(cacheDir, "rec_${System.currentTimeMillis()}.wav")
+        recording = true
+        recCancelled = false
+        btn.text = "STOP RECORDING"
+        status("recording — up to 15 s, tap stop when done", TXT2)
+        recThread = Thread {
+            try {
+                val rate = 16000
+                val minBuf = android.media.AudioRecord.getMinBufferSize(
+                    rate, android.media.AudioFormat.CHANNEL_IN_MONO,
+                    android.media.AudioFormat.ENCODING_PCM_16BIT
+                )
+                val rec = android.media.AudioRecord(
+                    MediaRecorder.AudioSource.MIC, rate,
+                    android.media.AudioFormat.CHANNEL_IN_MONO,
+                    android.media.AudioFormat.ENCODING_PCM_16BIT, minBuf * 2
+                )
+                val maxBytes = rate * 2 * 15
+                val data = java.io.ByteArrayOutputStream()
+                val buf = ShortArray(2048)
+                try {
+                    rec.startRecording()
+                    while (!recCancelled && data.size() < maxBytes) {
+                        val n = rec.read(buf, 0, buf.size)
+                        if (n > 0) {
+                            val b = ByteArray(n * 2)
+                            java.nio.ByteBuffer.wrap(b)
+                                .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                                .asShortBuffer().put(buf, 0, n)
+                            data.write(b)
+                        }
+                    }
+                } finally {
+                    try { rec.stop() } catch (_: Exception) {}
+                    rec.release()
+                }
+                writeWav(f, data.toByteArray(), rate)
+                val secs = data.size() / (rate * 2.0)
+                ui {
+                    recording = false
+                    btn.text = "RECORD MY VOICE"
+                    if (secs >= 3.0) {
+                        playFile(f)
+                        askNameAndSave(f)
+                        status(String.format(java.util.Locale.US,
+                            "recorded %.1f s — listen, then save", secs), TEAL)
+                    } else {
+                        status("too short — read at least a few seconds", RED)
+                    }
+                }
+            } catch (e: Exception) {
+                ui {
+                    recording = false
+                    btn.text = "RECORD MY VOICE"
+                    status("recording failed: ${e.message}", RED)
+                }
+            }
+        }.also { it.start() }
+    }
+
+    private fun stopRecorder() {
+        recCancelled = true
+        try { recThread?.join(1000) } catch (_: Exception) {}
+        recThread = null
+        recording = false
+    }
+
+    /** Minimal WAV writer: 16-bit PCM mono header + payload. */
+    private fun writeWav(f: File, pcm: ByteArray, rate: Int) {
+        java.io.FileOutputStream(f).use { w ->
+            w.write("RIFF".toByteArray()); w32(w, 36 + pcm.size)
+            w.write("WAVE".toByteArray()); w.write("fmt ".toByteArray())
+            w32(w, 16); w16(w, 1); w16(w, 1)
+            w32(w, rate); w32(w, rate * 2); w16(w, 2); w16(w, 16)
+            w.write("data".toByteArray()); w32(w, pcm.size)
+            w.write(pcm)
+        }
+    }
+
+    private fun w16(w: java.io.OutputStream, v: Int) {
+        w.write(v and 0xFF); w.write((v shr 8) and 0xFF)
+    }
+
+    private fun w32(w: java.io.OutputStream, v: Int) {
+        w16(w, v); w16(w, v shr 16)
+    }
+
+    /** Name dialog -> save into VoiceStore -> select + refresh. */
+    private fun askNameAndSave(src: File) {
+        val input = fieldEt("Voice name (e.g. My narration voice)", "")
+        val wrap = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }
+        wrap.addView(input)
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Save this voice")
+            .setMessage("Saved voices stay on this phone — pick them anytime without recording again.")
+            .setView(wrap)
+            .setPositiveButton("Save") { _, _ ->
+                val name = input.text.toString().trim().ifEmpty { "My voice" }
+                val v = voiceStore.add(name, src)
+                savedVoices = voiceStore.list()
+                selectedVoice = v
+                refreshSavedVoices()
+                status("saved \"$name\" — selected for cloning", TEAL)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_PERM_MIC) {
+            if (grantResults.isNotEmpty() &&
+                grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                status("mic ready — tap Record my voice", TEAL)
+            } else {
+                status("mic denied — use Pick an audio file instead", RED)
+            }
+        }
     }
 
     /** Background job: submit → poll → download → export. Updates via ui{}. */
@@ -529,22 +894,25 @@ class VoiceActivity : Activity() {
         speaker: String,
         instruct: String,
         designPrompt: String,
-        refText: String
+        refText: String,
+        speedUsed: Double,
+        loudnessUsed: Double
     ) {
         val api = VoiceApi(base)
         var refBytes: Pair<String, ByteArray>? = null
         if (modeUsed == "clone") {
             try {
-                val bytes = contentResolver.openInputStream(refAudioUri!!)?.use { it.readBytes() }
-                if (bytes == null || bytes.isEmpty()) throw RuntimeException("empty file")
-                refBytes = (if (refAudioName.isNotBlank()) refAudioName else "ref.wav") to bytes
+                val v = selectedVoice ?: throw RuntimeException("no voice selected")
+                val bytes = v.file.readBytes()
+                if (bytes.isEmpty()) throw RuntimeException("empty voice file")
+                refBytes = "${v.name}.wav" to bytes
             } catch (e: Exception) {
-                ui { status("cannot read reference audio: ${e.message}", RED); doneUi() }
+                ui { status("cannot read saved voice: ${e.message}", RED); doneUi() }
                 return
             }
         }
         val jobId = api.generate(script, modeUsed, language, speaker,
-            instruct, designPrompt, refText, refBytes)
+            instruct, designPrompt, refText, refBytes, speedUsed, loudnessUsed)
         if (jobId == null) {
             ui { status("submit failed: ${api.lastError}", RED); doneUi() }
             return

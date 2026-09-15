@@ -61,7 +61,9 @@ class VoiceApi(private val baseUrl: String) {
         instruct: String,
         designPrompt: String,
         refText: String,
-        refAudio: Pair<String, ByteArray>?     // (fileName, bytes) — clone mode
+        refAudio: Pair<String, ByteArray>?,    // (fileName, bytes) — clone mode
+        speed: Double = 1.0,
+        loudness: Double = 1.0
     ): String? {
         lastError = null
         val boundary = "voice-boundary-${System.currentTimeMillis()}"
@@ -79,6 +81,8 @@ class VoiceApi(private val baseUrl: String) {
             }
             writeField("text", text)
             writeField("mode", mode)
+            writeField("speed", String.format(java.util.Locale.US, "%.2f", speed))
+            writeField("loudness", String.format(java.util.Locale.US, "%.2f", loudness))
             if (mode == "custom") {
                 writeField("speaker", speaker)
                 writeField("language", language)
