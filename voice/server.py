@@ -88,8 +88,23 @@ def get_model(mode: str):
             "dtype": torch.bfloat16 if DEVICE == "cuda" else torch.float32,
         }
         if DEVICE == "cuda":
-            kwargs["attn_implementation"] = "flash_attention_2"
-        _loaded[mode] = Qwen3TTSModel.from_pretrained(MODELS[mode], **kwargs)
+            # Use flash-attn only when actually importable; otherwise PyTorch
+            # SDPA. Forcing flash_attention_2 without the package crashes the
+            # model load ("FlashAttention2 has been toggled on ...").
+            try:
+                import flash_attn  # noqa: F401
+                kwargs["attn_implementation"] = "flash_attention_2"
+            except Exception:
+                kwargs["attn_implementation"] = "sdpa"
+        try:
+            _loaded[mode] = Qwen3TTSModel.from_pretrained(MODELS[mode], **kwargs)
+        except Exception as e:
+            # Last resort: attention-related rejection -> retry with default.
+            if "attention" in str(e).lower() or "attn" in str(e).lower():
+                kwargs.pop("attn_implementation", None)
+                _loaded[mode] = Qwen3TTSModel.from_pretrained(MODELS[mode], **kwargs)
+            else:
+                raise
         print(f"{mode} model ready")
     return _loaded[mode]
 
