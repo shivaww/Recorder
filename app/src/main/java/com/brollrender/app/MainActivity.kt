@@ -398,24 +398,12 @@ class MainActivity : Activity() {
         ))
         col.addView(spacer(dp(16)))
 
-        // ---- machine footer: counts at a glance, infrastructure one tap down ----
+        // ---- machine footer: counts at a glance, one door to infrastructure ----
         col.addView(monoTv("queue ${blocks.size} · farm $farmCount", 11, TXT2))
         col.addView(spacer(dp(10)))
-        col.addView(displayTv("Machine room", 12, TXT))
-        col.addView(spacer(dp(8)))
-        col.addView(mkButton("Queue overnight renders").apply {
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44))
-            setOnClickListener { showQueueScreen() }
-        })
-        col.addView(spacer(dp(6)))
-        col.addView(mkButton("Kaggle farm").apply {
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44))
-            setOnClickListener { showKaggleSetupScreen() }
-        })
-        col.addView(spacer(dp(6)))
-        col.addView(mkButton("Generation prompt").apply {
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44))
-            setOnClickListener { downloadGenerationPrompt(this) }
+        col.addView(mkButton("Machine room", filled = true).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46))
+            setOnClickListener { showMachineRoomScreen() }
         })
         col.addView(spacer(dp(8)))
         showScreen(android.widget.ScrollView(this).apply { addView(col) })
@@ -846,6 +834,21 @@ class MainActivity : Activity() {
             setPadding(pad, pad, pad, pad)
         }
 
+        // Pipeline rail — the video flow states itself: where you are and
+        // what has been decided so far.
+        col.addView(Console.pipelineRail(
+            this,
+            listOf(
+                "source" to htmlName,
+                "frame" to if (p.manualRecommended) "manual" else "auto",
+                "render" to "${resW}x${resH} · $fps",
+                "export" to ""
+            ),
+            active = 1,
+            accent = AMBER
+        ))
+        col.addView(spacer(dp(14)))
+
         // FRAMING: AUTO = detected DOM frame (spec section 4); MANUAL =
         // pinch/drag zoom+pan in a ZoomView whose brackets are the output
         // frame (WYSIWYG). Defaults to MANUAL when detection failed, so
@@ -1215,6 +1218,18 @@ class MainActivity : Activity() {
         // path reads the composited frame. An opaque screen would let the
         // RenderThread cull it. The e2e gate now decides GPU vs CPU; this
         // screen must not influence that decision.
+        col.addView(Console.pipelineRail(
+            this,
+            listOf(
+                "source" to htmlName,
+                "frame" to "",
+                "render" to "${resW}x${resH} · $fps · ${durationSec}s",
+                "export" to ""
+            ),
+            active = 2,
+            accent = AMBER
+        ))
+        col.addView(spacer(dp(18)))
         col.addView(displayTv(title, 22, AMBER))
         col.addView(spacer(dp(4)))
         col.addView(monoTv("${resW}x${resH} @ ${fps}fps · ${durationSec}s", 11, TXT2))
@@ -1622,6 +1637,18 @@ class MainActivity : Activity() {
             setPadding(pad, pad, pad, pad)
             gravity = Gravity.CENTER_VERTICAL
         }
+        col.addView(Console.pipelineRail(
+            this,
+            listOf(
+                "source" to htmlName,
+                "frame" to "",
+                "render" to "${vw}x${vh}",
+                "export" to if (vw == resW && vh == resH) "verified" else "mismatch"
+            ),
+            active = 3,
+            accent = AMBER
+        ))
+        col.addView(spacer(dp(18)))
         col.addView(displayTv("Render complete", 24, TEAL))
         col.addView(spacer(dp(14)))
 
@@ -1688,6 +1715,60 @@ class MainActivity : Activity() {
     }
 
     // ===================== KAGGLE SETUP SCREEN =====================
+
+    /** Machine room — one door for all infrastructure: farm connection,
+     *  jobs, overnight queue, generation prompt. Out of the creative path. */
+    private fun showMachineRoomScreen() {
+        val pad = dp(20)
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad)
+        }
+        val farmCount = synchronized(remoteJobs) { remoteJobs.size }
+        val machineAlive = lastGpu.isNotEmpty()
+        val urlSet = securePrefs.baseUrl.isNotBlank()
+
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        head.addView(displayTv("Machine room", 24, AMBER).apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        head.addView(monoTv(if (machineAlive) "alive" else "offline", 10, TXT2))
+        head.addView(spacer(dp(6)))
+        head.addView(Console.led(this, if (machineAlive) TEAL else Console.EDGE))
+        col.addView(head)
+        col.addView(spacer(dp(4)))
+        col.addView(bodyTv(
+            if (urlSet) "Farm BASE URL saved. The tunnel URL changes every Kaggle session — update it after each restart."
+            else "No farm BASE URL yet — start with the Kaggle farm setup.",
+            12, TXT2))
+        col.addView(spacer(dp(18)))
+
+        col.addView(mkButton("Kaggle farm setup", filled = true).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48))
+            setOnClickListener { showKaggleSetupScreen() }
+        })
+        col.addView(spacer(dp(8)))
+        col.addView(mkButton(if (farmCount > 0) "Farm jobs ($farmCount)" else "Farm jobs").apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48))
+            setOnClickListener { showRemoteJobsScreen() }
+        })
+        col.addView(spacer(dp(8)))
+        col.addView(mkButton(if (blocks.size > 0) "Overnight queue (${blocks.size})" else "Overnight queue").apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48))
+            setOnClickListener { showQueueScreen() }
+        })
+        col.addView(spacer(dp(8)))
+        col.addView(mkButton("Generation prompt").apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48))
+            setOnClickListener { downloadGenerationPrompt(this) }
+        })
+        col.addView(spacer(dp(18)))
+        col.addView(mkButton("Back to studio").apply { setOnClickListener { showPickScreen() } })
+        showScreen(android.widget.ScrollView(this).apply { addView(col) })
+    }
 
     private fun showKaggleSetupScreen() {
         val pad = dp(20)
