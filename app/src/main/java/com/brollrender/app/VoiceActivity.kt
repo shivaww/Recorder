@@ -96,6 +96,9 @@ class VoiceActivity : Activity() {
     private var recording = false
     @Volatile private var recCancelled = false
 
+    // Last known voice-server reachability (updated by Test connection).
+    @Volatile private var voiceAlive = false
+
     @Volatile private var generating = false
     @Volatile private var voiceCancel = false
 
@@ -167,8 +170,9 @@ class VoiceActivity : Activity() {
         }
 
     private fun styleButton(b: Button, filled: Boolean, danger: Boolean = false) {
-        b.background = Console.buttonBg(this, filled, danger)
-        b.setTextColor(if (filled) VOID else if (danger) RED else AMBER)
+        // VOICE engine: primary fills and quiet labels carry the teal accent.
+        b.background = Console.buttonBg(this, filled, danger, accent = TEAL)
+        b.setTextColor(if (filled) VOID else if (danger) RED else TEAL)
     }
 
     private fun mkButton(
@@ -254,11 +258,32 @@ class VoiceActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
         }
-        col.addView(displayTv("Voice studio", 26, AMBER))
-        col.addView(spacer(dp(6)))
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        head.addView(displayTv("Voice studio", 24, TEAL).apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        head.addView(monoTv("server", 10, TXT2))
+        head.addView(spacer(dp(6)))
+        head.addView(Console.led(this, if (voiceAlive) TEAL else Console.EDGE))
+        col.addView(head)
+        col.addView(spacer(dp(8)))
+        col.addView(Console.pipelineRail(
+            this,
+            listOf(
+                "voice" to mode,
+                "script" to "",
+                "output" to ""
+            ),
+            active = 1,
+            accent = TEAL
+        ))
+        col.addView(spacer(dp(14)))
         col.addView(bodyTv(
             "Qwen3-TTS — preset speakers, 3-second voice cloning and natural-language voice design, generated on your Kaggle GPU notebook.",
-            13, TXT2))
+            12, TXT2))
         col.addView(spacer(dp(16)))
         buildConnectionCard(col)
         col.addView(spacer(dp(14)))
@@ -314,6 +339,7 @@ class VoiceActivity : Activity() {
                 Thread {
                     val api = VoiceApi(url)
                     val (ok, latency) = api.testConnection()
+                    voiceAlive = ok
                     ui {
                         connStatus.text = if (ok)
                             "Connected in ${latency}ms — voice server is alive."
@@ -710,7 +736,7 @@ class VoiceActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
         }
-        col.addView(displayTv("Add my voice", 24, AMBER))
+        col.addView(displayTv("Add my voice", 24, TEAL))
         col.addView(spacer(dp(6)))
         col.addView(bodyTv(
             "Record in a quiet place, in exactly your own tone and style. " +
@@ -997,7 +1023,18 @@ class VoiceActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
         }
-        col.addView(displayTv("Voice done", 26, AMBER))
+        col.addView(Console.pipelineRail(
+            this,
+            listOf(
+                "voice" to modeUsed,
+                "script" to "",
+                "output" to String.format(java.util.Locale.US, "%.1fs", durSec)
+            ),
+            active = 2,
+            accent = TEAL
+        ))
+        col.addView(spacer(dp(18)))
+        col.addView(displayTv("Voice done", 26, TEAL))
         col.addView(spacer(dp(6)))
         col.addView(bodyTv("Qwen3-TTS synthesis finished and saved to Music/NexonStudio.", 13, TXT2))
         col.addView(spacer(dp(14)))
