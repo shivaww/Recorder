@@ -136,6 +136,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Console.init(this)
         engine = RenderEngine(this)
         root = FrameLayout(this)
         // The engine's WebView renders GHOST-VISIBLE at the BOTTOM of this

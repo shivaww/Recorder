@@ -101,6 +101,7 @@ class VoiceActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Console.init(this)
         securePrefs = SecurePrefs(this)
         voiceStore = VoiceStore(this)
         savedVoices = voiceStore.list()
