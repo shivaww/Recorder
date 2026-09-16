@@ -299,7 +299,7 @@ class MainActivity : Activity() {
     ): LinearLayout {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = Console.panelBg(this, stroke = accent)
+            background = Console.panelBg(this@MainActivity, stroke = accent)
             setPadding(dp(16), dp(14), dp(16), dp(14))
         }
         val head = LinearLayout(this).apply {
