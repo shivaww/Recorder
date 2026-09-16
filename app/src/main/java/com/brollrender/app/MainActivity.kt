@@ -288,137 +288,136 @@ class MainActivity : Activity() {
         return File(blockDir(), "b$blockSeq.html")
     }
 
+    /** One engine card — accent-stroked panel declaring its engine, with
+     *  the engine's primary verbs. The accent IS the engine identity. */
+    private fun engineCard(
+        title: String,
+        kind: String,
+        accent: Int,
+        summary: String,
+        actions: List<Pair<String, () -> Unit>>
+    ): LinearLayout {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = Console.panelBg(this, stroke = accent)
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+        }
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        head.addView(displayTv(title, 18, accent))
+        head.addView(spacer(dp(8)))
+        head.addView(monoTv(kind.uppercase(), 10, TXT2).apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        card.addView(head)
+        card.addView(spacer(dp(6)))
+        card.addView(monoTv(summary, 11, TXT2))
+        card.addView(spacer(dp(12)))
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        actions.forEachIndexed { i, act ->
+            if (i > 0) row.addView(spacer(dp(8)))
+            row.addView(Button(this).apply {
+                text = act.first.uppercase()
+                textSize = 13f
+                isAllCaps = false
+                letterSpacing = 0.06f
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                typeface = Console.display()
+                background = Console.buttonBg(context, primary = (i == 0), accent = accent)
+                setTextColor(if (i == 0) Console.VOID else Console.CHALK)
+                layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f)
+                setOnClickListener { act.second() }
+            })
+        }
+        card.addView(row, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        return card
+    }
+
     private fun showPickScreen() {
         val pad = dp(20)
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
         }
-        col.addView(displayTv("Nexon Studio", 28, AMBER))
-        col.addView(spacer(dp(4)))
-        col.addView(bodyTv(
-            "Turn HTML motion clips into exact 16:9 MP4s — rendered on this phone or on the Kaggle farm.",
-            13, TXT2))
-        col.addView(spacer(dp(24)))
-        col.addView(mkButton("Choose HTML file", filled = true).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(52)
-            )
-            setOnClickListener {
-                queuePick = false
-                launchPicker()
-            }
-        })
-        col.addView(spacer(dp(8)))
-        col.addView(mkButton("Paste HTML code").apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(48)
-            )
-            setOnClickListener { pasteHtml() }
-        })
-        if (htmlFile != null) {
-            col.addView(spacer(dp(10)))
-            col.addView(monoTv("last: $htmlName", 11, TXT2))
-        }
-        col.addView(spacer(dp(20)))
-        // Overnight batch is a SEPARATE feature: its own queue screen, never
-        // in the way of the normal PICK -> PREVIEW -> RENDER -> DONE flow.
-        col.addView(displayTv("Render paths", 13, TXT))
-        col.addView(spacer(dp(8)))
-        col.addView(mkButton("Overnight queue on phone").apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(48)
-            )
-            setOnClickListener { showQueueScreen() }
-        })
-        col.addView(spacer(dp(8)))
-        col.addView(mkButton("Render via Kaggle farm").apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(48)
-            )
-            setOnClickListener { showKaggleSetupScreen() }
-        })
-        col.addView(spacer(dp(8)))
         val farmCount = synchronized(remoteJobs) { remoteJobs.size }
-        col.addView(mkButton(if (farmCount > 0) "View farm jobs ($farmCount)" else "View farm jobs").apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(48)
-            )
+        val machineAlive = lastGpu.isNotEmpty()
+
+        // Wordmark + machine LED — the only always-on status that matters.
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        head.addView(displayTv("Nexon Studio", 24, AMBER).apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        head.addView(monoTv("farm", 10, TXT2).apply {
             setOnClickListener { showRemoteJobsScreen() }
         })
-        col.addView(spacer(dp(8)))
-        col.addView(mkButton("Download generation prompt").apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(48)
+        head.addView(spacer(dp(6)))
+        head.addView(Console.led(this, if (machineAlive) TEAL else Console.EDGE))
+        col.addView(head)
+        col.addView(spacer(dp(4)))
+        col.addView(bodyTv(
+            "A pocket studio — motion clips to exact MP4s, scripts to voice, on this phone or the Kaggle farm.",
+            12, TXT2))
+        col.addView(spacer(dp(18)))
+
+        // ---- engine cards: the two things this app does ----
+        col.addView(engineCard(
+            title = "Pixel",
+            kind = "video engine",
+            accent = AMBER,
+            summary = if (htmlFile != null) "loaded: $htmlName" else "no clip loaded yet",
+            actions = listOf(
+                "Choose HTML" to {
+                    queuePick = false
+                    launchPicker()
+                },
+                "Paste HTML" to { pasteHtml() }
             )
+        ))
+        col.addView(spacer(dp(12)))
+        val voiceCount = VoiceStore(this).list().size
+        col.addView(engineCard(
+            title = "Voice",
+            kind = "audio engine",
+            accent = TEAL,
+            summary = if (voiceCount > 0)
+                "$voiceCount saved ${if (voiceCount == 1) "voice" else "voices"} ready"
+            else "custom · clone · design",
+            actions = listOf(
+                "Open studio" to {
+                    startActivity(
+                        android.content.Intent(this@MainActivity, VoiceActivity::class.java)
+                    )
+                }
+            )
+        ))
+        col.addView(spacer(dp(16)))
+
+        // ---- machine footer: counts at a glance, infrastructure one tap down ----
+        col.addView(monoTv("queue ${blocks.size} · farm $farmCount", 11, TXT2))
+        col.addView(spacer(dp(10)))
+        col.addView(displayTv("Machine room", 12, TXT))
+        col.addView(spacer(dp(8)))
+        col.addView(mkButton("Queue overnight renders").apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44))
+            setOnClickListener { showQueueScreen() }
+        })
+        col.addView(spacer(dp(6)))
+        col.addView(mkButton("Kaggle farm").apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44))
+            setOnClickListener { showKaggleSetupScreen() }
+        })
+        col.addView(spacer(dp(6)))
+        col.addView(mkButton("Generation prompt").apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44))
             setOnClickListener { downloadGenerationPrompt(this) }
         })
         col.addView(spacer(dp(8)))
-        col.addView(mkButton("Voice studio (Qwen3-TTS)").apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(48)
-            )
-            setOnClickListener {
-                startActivity(android.content.Intent(this@MainActivity, VoiceActivity::class.java))
-            }
-        })
-        col.addView(spacer(dp(28)))
-
-        val resRow = toggleRow(
-            col, "RESOLUTION",
-            listOf(
-                "4K" to { resW = 3840; resH = 2160 },
-                "1080p" to { resW = 1920; resH = 1080 },
-                "720p" to { resW = 1280; resH = 720 },
-                "480p" to { resW = 854; resH = 480 }
-            ),
-            if (resW == 3840) 0 else if (resW == 1920) 1 else if (resW == 1280) 2 else 3
-        )
-        val fpsRow = toggleRow(
-            col, "FPS",
-            listOf(
-                "30" to { fps = 30 },
-                "24" to { fps = 24 },
-                "60" to { fps = 60 }
-            ),
-            if (fps == 30) 0 else if (fps == 24) 1 else 2
-        )
-        // MODE is a preset: selecting it snaps the resolution + FPS rows too.
-        toggleRow(
-            col, "MODE",
-            listOf(
-                "FINAL" to {
-                    resRow.select(0); resW = 1920; resH = 1080
-                    fpsRow.select(0); fps = 30
-                },
-                "DRAFT" to {
-                    resRow.select(1); resW = 1280; resH = 720
-                    fpsRow.select(1); fps = 24
-                }
-            ),
-            if (resW == 1920 && fps == 30) 0 else 1
-        )
-        toggleRow(
-            col, "BITRATE",
-            listOf(
-                "12M mob" to { bitRate = 12_000_000 },
-                "20M mob" to { bitRate = 20_000_000 },
-                "40M lap" to { bitRate = 40_000_000 },
-                "80M max" to { bitRate = 80_000_000 }
-            ),
-            if (bitRate == 12_000_000) 0 else if (bitRate == 20_000_000) 1 else if (bitRate == 40_000_000) 2 else 3
-        )
-        prepared?.let { p ->
-            col.addView(spacer(dp(14)))
-            col.addView(monoTv("DURATION  auto ${p.durationMs / 1000} s - editable on preview", 12, TXT2))
-        }
         showScreen(android.widget.ScrollView(this).apply { addView(col) })
     }
 
@@ -1048,6 +1047,25 @@ class MainActivity : Activity() {
                 "LARGE" to { textScale = 1.35f }
             ),
             1
+        )
+
+        val resRow = toggleRow(
+            col, "RESOLUTION",
+            listOf(
+                "4K" to { resW = 3840; resH = 2160 },
+                "1080p" to { resW = 1920; resH = 1080 },
+                "720p" to { resW = 1280; resH = 720 },
+                "480p" to { resW = 854; resH = 480 }
+            ),
+            if (resW == 3840) 0 else if (resW == 1920) 1 else if (resW == 1280) 2 else 3
+        )
+        toggleRow(
+            col, "MODE",
+            listOf(
+                "FINAL" to { resRow.select(1); resW = 1920; resH = 1080 },
+                "DRAFT" to { resRow.select(2); resW = 1280; resH = 720 }
+            ),
+            if (resW == 1920) 0 else 1
         )
 
         // ENHANCE: honest naming - a color grade (contrast ~1.12 around
