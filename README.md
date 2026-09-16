@@ -1,6 +1,10 @@
 # Nexon Studio
 
-Single-Activity Android app: pick a self-contained HTML animation (CSS keyframes, no JS logic) -> render it offscreen, frame-by-frame -> pixel-exact 16:9 MP4 (480p/720p/1080p, 24/30/60 fps). Zero third-party dependencies. No screen capture, no ffmpeg, no network needed after the first render.
+Pocket production studio: HTML motion clips -> pixel-exact 16:9 MP4s, and scripts -> Qwen3-TTS voice audio. Renders on this phone or on a Kaggle GPU farm. Zero third-party code; no screen capture, no ffmpeg.
+
+## Design
+
+Mission-control identity: steel panels on a blue-cast void, warm chalk ink, two semantic accents (AMBER = PIXEL, TEAL = VOICE), Chakra Petch display / Saira body / IBM Plex Mono data. The pipeline rail is the signature element — the render sequence, its state, and its captured decisions in one strip. Typefaces bundled as assets.
 
 ## Build (no PC needed)
 
@@ -10,10 +14,14 @@ The repo commits `debug.keystore`, so every rebuild is signed identically and in
 
 ## Use
 
-1. **PICK** - CHOOSE HTML (system file picker, `text/html`), resolution 480p/720p/1080p, FPS and MODE presets (MODE snaps resolution + fps + bitrate together).
-2. **PREVIEW** - FRAMING: AUTO (amber brackets lock the DOM-detected 16:9 frame) or MANUAL (pinch/drag zoom+pan, editor-style CROP with draggable corner handles + thirds grid, FULL/CENTER presets - what is inside the brackets is exactly what gets recorded). Settings: FPS 24/30/60, BITRATE 8/16/24 Mbps, ENHANCE OFF/ON, SFX OFF/ON (when the page declares #sfx events), editable duration (5-600 s).
+The home screen is two engine cards — **PIXEL** (video) and **VOICE** (audio), each in its engine accent — plus a machine footer (queue/farm counts) and one door to the **Machine room**: farm setup, farm jobs, overnight queue, generation prompt, all out of the creative path.
+
+**PIXEL flow** — the pipeline rail (SOURCE · FRAME · RENDER · EXPORT, carrying each step's captured decision) persists across every screen:
+
+1. **SOURCE** - Choose HTML (system file picker, `text/html`) or paste code.
+2. **FRAME** - preview with AUTO (amber brackets lock the DOM-detected 16:9 frame) or MANUAL framing (pinch/drag zoom+pan, editor-style CROP with corner handles + thirds grid, FULL/CENTER presets). Resolution 480p/720p/1080p/4K, FPS 24/30/60, BITRATE, ENHANCE, SFX (when the page declares #sfx events) and editable duration (5-600 s) live on this screen.
 3. **RENDER** - progress bar with `frame N/T - r f/s - ETA`; CANCEL aborts cleanly (encoder released, partial file deleted).
-4. **DONE** - file card read back with MediaMetadataRetriever: name, size, duration, resolution, VERIFIED/MISMATCH line. OPEN / SHARE / RENDER ANOTHER.
+4. **EXPORT** - file card read back with MediaMetadataRetriever: name, size, duration, resolution, VERIFIED/MISMATCH line. OPEN / SHARE / RENDER ANOTHER.
 
 Output lands in `Movies/NexonStudio/NexonStudio_<stamp>.mp4`, with `Pictures/NexonStudio/<stamp>_frame0.png` for eyeball QC (MediaStore forbids images under Movies/).
 
