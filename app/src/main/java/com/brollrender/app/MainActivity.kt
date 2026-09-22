@@ -1885,25 +1885,30 @@ class MainActivity : Activity() {
         connRow.addView(spacer(dp(8)))
         connRow.addView(mkButton("Test connection").apply {
             layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f)
-            setOnClickListener {
-                val url = baseUrlInput.text.toString().trim()
-                if (url.isEmpty()) { return@setOnClickListener }
-                connStatus.text = "Testing..."
-                connStatus.setTextColor(TXT2)
-                Thread {
-                    val api = RemoteApi(url)
-                    val (ok, latency) = api.testConnection()
-                    val err = api.lastError ?: ""
-                    runOnUiThread {
-                        connStatus.text = when {
-                            ok -> "Connected in ${latency}ms — server accepted the key."
-                            err.contains("403") -> "Server reachable but rejected the API key. Re-copy it from the READY block."
-                            else -> "Cannot reach the server. Check the BASE URL and that the tunnel cell is alive."
+                setOnClickListener {
+                    val url = baseUrlInput.text.toString().trim()
+                    if (url.isEmpty()) { return@setOnClickListener }
+                    connStatus.text = "Testing..."
+                    connStatus.setTextColor(TXT2)
+                    Thread {
+                        val api = RemoteApi(url)
+                        val (ok, latency) = api.testConnection()
+                        val err = api.lastError ?: ""
+                        // Commit on success: what was just tested is now what
+                        // the whole app (polling, submit, downloads) uses.
+                        // Before, Test only probed the typed URL while the
+                        // app kept hammering the previously saved one.
+                        if (ok) securePrefs.baseUrl = url
+                        runOnUiThread {
+                            connStatus.text = when {
+                                ok -> "Connected in ${latency}ms — URL saved, the farm uses this tunnel now."
+                                err.contains("403") -> "Server reachable but rejected the API key. Re-copy it from the READY block."
+                                else -> "Cannot reach the server. The app still uses the last SAVED url — press Save settings to switch."
+                            }
+                            connStatus.setTextColor(if (ok) TEAL else RED)
                         }
-                        connStatus.setTextColor(if (ok) TEAL else RED)
-                    }
-                }.start()
-            }
+                    }.start()
+                }
         })
         connCard.addView(connRow)
         connCard.addView(spacer(dp(6)))
