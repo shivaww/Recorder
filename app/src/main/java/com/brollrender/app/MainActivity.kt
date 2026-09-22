@@ -2050,6 +2050,26 @@ class MainActivity : Activity() {
         showScreen(android.widget.ScrollView(this).apply { addView(col) })
     }
 
+    /** Declared timeline length (s) for a staged block, read straight from
+     *  the HTML: the #duration JSON tag, then `var DUR = N`, else 10 (the
+     *  farm's validator auto-detects and corrects server-side anyway). */
+    private fun readBlockDuration(f: File): Int {
+        try {
+            val html = f.readText()
+            val tag = Regex("""<script[^>]*id=["']duration["'][^>]*>([\s\S]*?)</script>""")
+                .find(html)?.groupValues?.get(1)
+            val fromTag = tag
+                ?.let { Regex("""["](?:seconds|duration)["]\s*:\s*([0-9.]+)""").find(it) }
+                ?.groupValues?.get(1)?.toDoubleOrNull()
+            val fromVar = Regex("""(?:var|let|const)\s+DUR\s*=\s*([0-9.]+)""")
+                .find(html)?.groupValues?.get(1)?.toDoubleOrNull()
+            val d = fromTag ?: fromVar
+            if (d != null && d > 0.0) return d.coerceIn(2.0, 600.0).toInt()
+        } catch (e: Exception) {
+        }
+        return 10
+    }
+
     private fun startRemoteSubmit() {
         if (blocks.isEmpty()) {
             showErrorScreen("No blocks queued")
@@ -2072,7 +2092,8 @@ class MainActivity : Activity() {
             var successCount = 0
             
             blocks.forEach { block ->
-                val jobId = api.submitJob(block.file, fps, resStr, 10, batchEnhance, bitRate) { pct ->
+                val dur = readBlockDuration(block.file)
+                val jobId = api.submitJob(block.file, fps, resStr, dur, batchEnhance, bitRate) { pct ->
                     runOnUiThread {
                         uploadBar?.progress = pct
                         uploadTv?.text = "Uploading ${block.name}: $pct%"
@@ -2086,7 +2107,7 @@ class MainActivity : Activity() {
                         state = "QUEUED",
                         fps = fps,
                         resolution = resStr,
-                        duration = 10,
+                        duration = dur,
                         enhance = batchEnhance
                     )
                     synchronized(remoteJobs) { remoteJobs.add(meta) }

@@ -61,19 +61,33 @@ RUNTIME_ANIM_JS = """() => {
 
 
 DURATION_JS = """() => {
+    // 1) Scrub-safe JS pages declare their own timeline (seconds).
+    try {
+        if (window.__broll && typeof window.__broll.duration === 'function') {
+            const d = window.__broll.duration();
+            if (typeof d === 'number' && isFinite(d) && d > 0) return d;
+        }
+    } catch (e) {}
+    // 2) Static declaration: <script type="application/json" id="duration">
+    //    holds {"seconds": N} (what the generator emits).
+    try {
+        const tag = document.querySelector('script#duration');
+        if (tag) {
+            const j = JSON.parse(tag.textContent);
+            const d = (j && typeof j.seconds === 'number') ? j.seconds
+                    : (j && typeof j.duration === 'number') ? j.duration : 0;
+            if (isFinite(d) && d > 0) return d;
+        }
+    } catch (e) {}
+    // 3) Last resort: CSS animation endTime scan (infinite ambient loops
+    //    report endTime === Infinity and are skipped, matching the app).
     let maxEnd = 0;
     const anims = (document.getAnimations ? document.getAnimations() : []);
     for (const a of anims) {
         try {
-            const ef = a.effect;
-            if (!ef || !ef.getTiming) continue;
-            const t = ef.getTiming();
-            const dur = (typeof t.duration === 'number') ? t.duration : 0;
-            const iterRaw = t.iterations;
-            if (typeof iterRaw === 'number' && !isFinite(iterRaw)) continue;
-            const it = (typeof iterRaw === 'number') ? iterRaw : 1;
-            const end = (t.delay || 0) + dur * it;
-            if (isFinite(end) && end > maxEnd) maxEnd = end;
+            const t = a.effect && a.effect.getComputedTiming();
+            const end = t && t.endTime;
+            if (typeof end === 'number' && isFinite(end) && end > maxEnd) maxEnd = end;
         } catch (e) {}
     }
     return maxEnd / 1000;
