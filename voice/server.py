@@ -64,7 +64,7 @@ else:
 os.makedirs(OUT_DIR, exist_ok=True)
 
 VO_MARKER = "{here complete voice over}"
-MAX_CHUNK_CHARS = 320
+MAX_CHUNK_CHARS = 500
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # Model IDs
@@ -181,6 +181,44 @@ def generate_one(model, mode, text, language, speaker, instruct, ref_audio, ref_
     return audio, sr
 
 
+def _trim_silence(audio, sr, thresh_db=-45.0, margin_ms=30.0):
+    """Trim leading/trailing near-silence from a 1-D float tensor, keeping a small margin."""
+    if audio.numel() == 0:
+        return audio
+    thresh = 10 ** (thresh_db / 20.0)
+    nz = torch.nonzero(audio.abs() > thresh, as_tuple=False).flatten()
+    if nz.numel() == 0:
+        return audio
+    margin = int(sr * margin_ms / 1000.0)
+    start = max(0, int(nz[0].item()) - margin)
+    end = min(int(audio.numel()), int(nz[-1].item()) + margin)
+    return audio[start:end]
+
+
+def _edge_fade(audio, sr, fade_ms=25.0):
+    """Short linear fade-in/out so trimmed chunk edges don't click."""
+    n = int(sr * fade_ms / 1000.0)
+    if n <= 0 or audio.numel() < 2 * n:
+        return audio
+    out = audio.clone()
+    ramp = torch.linspace(0.0, 1.0, n, dtype=audio.dtype, device=audio.device)
+    out[:n] = out[:n] * ramp
+    out[-n:] = out[-n:] * ramp.flip(0)
+    return out
+
+
+def _pause_for(chunk_text, sr, default_ms=150.0):
+    """Inter-chunk pause length driven by the chunk's final punctuation."""
+    t = (chunk_text or "").rstrip()
+    if t and t[-1] in ".!?\u2026":
+        ms = 200.0
+    elif t and t[-1] in ",;:":
+        ms = 110.0
+    else:
+        ms = default_ms
+    return int(sr * ms / 1000.0)
+
+
 def synthesize(mode, text, language, speaker, instruct, ref_audio, ref_text, design_prompt, job_id, speed=1.0, loudness=1.0):
     model = get_model(mode)
     vo_text = extract_vo(text)
@@ -194,9 +232,15 @@ def synthesize(mode, text, language, speaker, instruct, ref_audio, ref_text, des
             model, mode, chunk, language, speaker, instruct,
             ref_audio, ref_text, design_prompt, speed
         )
+        # Trim the model's own leading/trailing silence so we own the seam.
+        wav = _trim_silence(wav, sr)
+        # Short fade kills clicks at trimmed boundaries.
+        wav = _edge_fade(wav, sr, fade_ms=25.0)
         pieces.append(wav)
         if i < len(chunks) - 1:
-            pieces.append(torch.zeros(int(sr * 0.22)))
+            pause = _pause_for(chunk, sr)
+            if pause > 0:
+                pieces.append(torch.zeros(pause, dtype=wav.dtype))
 
     full = torch.cat(pieces, dim=0).unsqueeze(0)
     if loudness and abs(loudness - 1.0) > 1e-6:
