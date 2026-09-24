@@ -492,7 +492,7 @@ class RenderEngine(private val activity: Activity) {
             var suggestedZoom: ZoomTransform? = null
             if (ok == null) {
                 suggestedZoom = if (under != null) {
-                    // 16:9 frame smaller than the canvas (black-wrapper
+                    // Target-ratio frame smaller than the canvas (black-wrapper
                     // design): fit THE FRAME to the canvas. Re-rasterized CSS
                     // scaling - never a bitmap upscale (rule 2's intent:
                     // never resample captured pixels).
@@ -512,7 +512,11 @@ class RenderEngine(private val activity: Activity) {
             // A bitmap thumbnail is the proven CPU path. It does not need a
             // compositor callback (and must keep working if the GPU path is
             // unavailable on this device).
-            val thumb = Bitmap.createBitmap(THUMB_W, THUMB_H, Bitmap.Config.ARGB_8888)
+            // Portrait targets swap the thumb axes so its aspect matches the
+            // output (a fixed 480x270 would squeeze 9:16 content).
+            val thumbW = if (targetW >= targetH) THUMB_W else THUMB_H
+            val thumbH = if (targetW >= targetH) THUMB_H else THUMB_W
+            val thumb = Bitmap.createBitmap(thumbW, thumbH, Bitmap.Config.ARGB_8888)
             val thumbLatch = CountDownLatch(1)
             var thumbError: Exception? = null
             activity.runOnUiThread {
@@ -520,7 +524,7 @@ class RenderEngine(private val activity: Activity) {
                     try {
                         val c = Canvas(thumb)
                         c.drawColor(VOID_COLOR)
-                        c.scale(THUMB_W.toFloat() / targetW, THUMB_H.toFloat() / targetH)
+                        c.scale(thumbW.toFloat() / targetW, thumbH.toFloat() / targetH)
                         web.draw(c)
                     } catch (e: Exception) {
                         thumbError = e
@@ -561,7 +565,7 @@ class RenderEngine(private val activity: Activity) {
     /**
      * Contain-fit the page's content bounds (CONTENT_BOUNDS_JS, CSS px) into
      * the CSS viewport, centered, as the initial manual framing. The viewport
-     * is 16:9 (WebView laid out at W x H), so fitting it in CSS space is
+     * mirrors the output canvas (WebView laid out at W x H), so fitting in CSS is
      * fitting the video frame in output space. Null = unreadable bounds (the
      * user frames manually, scale 1).
      */
@@ -598,8 +602,8 @@ class RenderEngine(private val activity: Activity) {
     }
 
     /**
-     * Fit an undersized 16:9 frame to the full CSS viewport (which mirrors
-     * the 16:9 output canvas). Scale = contain-fit; pan maps the frame's
+     * Fit an undersized target-ratio frame to the full CSS viewport (which
+     * mirrors the output canvas). Scale = contain-fit; pan maps the frame's
      * top-left to the origin and centers any rounding sliver.
      */
     private fun frameFitZoom(u: FrameDetector.Result.Undersized): ZoomTransform? {

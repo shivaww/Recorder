@@ -1,7 +1,7 @@
 """renderer.py — Pixel-perfect Playwright frame rendering.
 
 Captures HTML animation frames with deterministic Chromium settings.
-Enforces exact 16:9 clip bounds with integer CSS pixels.
+Enforces exact target-aspect clip bounds (16:9 or 9:16) with integer CSS pixels.
 Reports progress via callback for real-time telemetry.
 """
 import os
@@ -25,7 +25,8 @@ def detect_content_bounds(page):
             || document.querySelector('#video-frame')
             || [...document.querySelectorAll('div')].find(d => {
                 const r = d.getBoundingClientRect();
-                return r.width > 100 && Math.abs(r.width / r.height - 16/9) < 0.01
+                 const ar = r.width / r.height;
+                 return r.width > 100 && (Math.abs(ar - 16/9) < 0.01 || Math.abs(ar - 9/16) < 0.01)
                     && !!d.querySelector('.stage');
             });
         if (!el) return null;
@@ -54,10 +55,11 @@ def detect_content_bounds(page):
     return bounds
 
 
-def enforce_16_9(bounds, vw=1920, vh=1080):
-    """Smallest 16:9 window that CONTAINS the bounds (expand, never crop),
-    centered on the bounds, clamped inside the viewport."""
-    target = 16.0 / 9.0
+def enforce_target_aspect(bounds, vw=1920, vh=1080):
+    """Smallest vw:vh-aspect window that CONTAINS the bounds (expand, never
+    crop), centered on the bounds, clamped inside the viewport. The aspect
+    derives from the viewport, so 16:9 and 9:16 jobs work unchanged."""
+    target = float(vw) / float(vh)
     bx, by, bw, bh = (int(round(bounds[k])) for k in ("x", "y", "w", "h"))
 
     # If the author frame essentially fills the viewport, capture it exactly
@@ -296,7 +298,7 @@ def render_frames(html_path, frames_dir, fps, resolution, duration, enhance,
             sfx_manifest = extract_sfx_manifest(page)
             amb_manifest = extract_ambience_manifest(page)
             raw_bounds = detect_content_bounds(page)
-            clip = enforce_16_9(raw_bounds, width, height)
+            clip = enforce_target_aspect(raw_bounds, width, height)
             print(f"[render] raw_bounds={raw_bounds} clip={clip}", flush=True)
         finally:
             browser.close()

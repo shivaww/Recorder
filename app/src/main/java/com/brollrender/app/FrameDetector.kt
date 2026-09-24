@@ -16,7 +16,7 @@ import kotlin.math.roundToInt
  */
 object FrameDetector {
 
-    private const val ASPECT_TOLERANCE = 0.01      // |w/h - 16/9|
+    private const val ASPECT_TOLERANCE = 0.01      // |w/h - target aspect|
     private const val DENSITY_TOLERANCE = 0.005    // |scaleX/scaleY - 1|
     private const val SLACK_PX = 2                 // bounds + never-upscale slack
 
@@ -30,7 +30,7 @@ object FrameDetector {
         data class Fail(val message: String) : Result()
 
         /**
-         * 16:9 frame detected but SMALLER than the target - common by design
+         * Target-ratio frame detected but SMALLER than the target - common by design
          * in generated pages (a black .viewport wrapper around the frame).
          * The app frame-fits it (CSS re-rasterization, never a bitmap
          * upscale) instead of aborting. CSS-px geometry is carried so the
@@ -57,7 +57,7 @@ object FrameDetector {
         }
         if (o.has("error")) {
             return Result.Fail(
-                "FRAME_NOT_FOUND - this HTML has no .fit / #video-frame / 16:9 .stage element"
+                "FRAME_NOT_FOUND - this HTML has no .fit / #video-frame / .stage element at the target ratio"
             )
         }
 
@@ -71,9 +71,14 @@ object FrameDetector {
             return Result.Fail("detection result incomplete - missing geometry fields")
         }
 
-        // Aspect check in CSS px (scale-independent).
-        if (abs(w / h - 16.0 / 9.0) > ASPECT_TOLERANCE) {
-            return Result.Fail("frame is ${fmt(w)}x${fmt(h)} CSS px - ratio is not 16:9 (broken page)")
+        // Aspect check in CSS px (scale-independent): the frame must match
+        // the TARGET ratio (16:9 or 9:16, per the selected output resolution).
+        val targetRatio = targetW.toDouble() / targetH.toDouble()
+        if (abs(w / h - targetRatio) > ASPECT_TOLERANCE) {
+            return Result.Fail(
+                "frame is ${fmt(w)}x${fmt(h)} CSS px - ratio does not match the " +
+                    "${targetW}x${targetH} target (switch RATIO or re-author the page)"
+            )
         }
 
         // Density consistency: W/vw must equal H/vh within 0.5%.
@@ -101,10 +106,10 @@ object FrameDetector {
         }
 
         // Section 4.5 wanted the frame to fill the target exactly - but
-        // generated pages often ship a 16:9 frame SMALLER than the canvas on
+        // generated pages often ship a frame SMALLER than the canvas on
         // purpose (black wrapper outside the frame). That is frame-fittable
-        // via re-rasterization, not broken. Only a LARGER frame (or non-16:9,
-        // already rejected above) is a hard failure.
+        // via re-rasterization, not broken. Only a LARGER frame (or a frame
+        // at the wrong ratio, already rejected above) is a hard failure.
         if (frameW > targetW + SLACK_PX || frameH > targetH + SLACK_PX) {
             return Result.Fail(
                 "frame is ${frameW}x${frameH}px but target is ${targetW}x${targetH}px - " +
@@ -115,7 +120,7 @@ object FrameDetector {
             return Result.Undersized(
                 Rect(left, top, right, bottom),
                 x, y, w, h, vw, vh,
-                "16:9 frame ${frameW}x${frameH}px in ${targetW}x${targetH}px canvas - frame-fitting"
+                "frame ${frameW}x${frameH}px in ${targetW}x${targetH}px canvas - frame-fitting"
             )
         }
 

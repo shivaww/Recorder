@@ -29,20 +29,22 @@ data class ZoomTransform(
  *  - PINCH: pinch 0.5x-4x + drag pan + double-tap reset.
  *  - CROP: gallery/editor-style - four draggable corner handles + move-rect
  *    over the base (unscaled) page, rule-of-thirds grid, dimmed scrim
- *    outside the rect; APPLY maps the 16:9 crop to the full output frame.
+ *    outside the rect; APPLY maps the target-aspect crop to the full output frame.
  *
  * The committed transform is injected into the WebView as a CSS transform
  * on <html> at render time: zoomed content re-rasterizes (crisp text and
  * vectors, NEVER a bitmap upscale of the capture - rule 2 intact). No screen
  * recording anywhere - the render path is unchanged.
  *
- * The preview bitmap is a 480x270 approximation; the render is exact.
+ * The preview bitmap is a long-edge-480 approximation; the render is exact.
  */
 @SuppressLint("ViewConstructor")
 class ZoomView(
     context: Context,
     private val thumb: Bitmap,
-    initial: ZoomTransform?
+    initial: ZoomTransform?,
+    /** Output aspect (resW / resH); the view shape and CROP rect keep it. */
+    private val cropAspect: Float = 16f / 9f
 ) : View(context) {
 
     var onTransform: ((ZoomTransform) -> Unit)? = null
@@ -52,7 +54,7 @@ class ZoomView(
     private var panX = 0f // view px
     private var panY = 0f
 
-    // CROP-mode state (rect in view px, always kept 16:9).
+    // CROP-mode state (rect in view px, always kept at the target aspect).
     private var cropMode = false
     private val crop = RectF()
     private var dragMode = -1 // -1 none, -2 move rect, 0..3 corner index
@@ -117,7 +119,7 @@ class ZoomView(
         cropMode = true
         val ix = width * 0.05f
         val iy = height * 0.05f
-        crop.set(ix, iy, width - ix, height - iy) // proportional inset keeps 16:9
+        crop.set(ix, iy, width - ix, height - iy) // proportional inset keeps the aspect
         dragMode = -1
         invalidate()
         onModeChange?.invoke(true)
@@ -248,7 +250,7 @@ class ZoomView(
         }
     }
 
-    /** Move corner [dragMode] to (x, y); opposite corner pinned; stays 16:9. */
+    /** Move corner [dragMode] to (x, y); opposite corner pinned; stays at the target aspect. */
     private fun setCropFromPoint(x: Float, y: Float) {
         val (ox, oy) = when (dragMode) {
             0 -> cornerAt(2) // drag TL, pin BR
@@ -260,20 +262,20 @@ class ZoomView(
         val sy = if (y >= oy) 1f else -1f
         val minH = height * 0.12f
         var h = abs(y - oy).coerceAtLeast(minH)
-        var w = h * 16f / 9f
+        var w = h * cropAspect
         val maxByX = if (sx > 0) width - ox else ox
         val maxByY = if (sy > 0) height - oy else oy
         if (w > maxByX) {
             w = maxByX
-            h = w * 9f / 16f
+            h = w / cropAspect
         }
         if (h > maxByY) {
             h = maxByY
-            w = h * 16f / 9f
+            w = h * cropAspect
         }
         if (h < minH) {
             h = minH
-            w = h * 16f / 9f
+            w = h * cropAspect
         }
         val l = if (sx > 0) ox else ox - w
         val t = if (sy > 0) oy else oy - h
@@ -285,7 +287,7 @@ class ZoomView(
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = View.MeasureSpec.getSize(widthMeasureSpec)
-        setMeasuredDimension(w, (w * 9f / 16f).toInt())
+        setMeasuredDimension(w, (w / cropAspect).toInt())
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {

@@ -22,14 +22,15 @@ object JsContracts {
         })
     """.trimIndent()
 
-    /** Returns the 16:9 frame geometry in CSS pixels. */
+    /** Returns the video frame geometry (16:9 or 9:16) in CSS pixels. */
     val DETECT_FRAME_JS = """
         (() => {
           const el = document.querySelector('.fit')
               || document.querySelector('#video-frame')
               || [...document.querySelectorAll('div')].find(d => {
                    const r = d.getBoundingClientRect();
-                   return r.width > 100 && Math.abs(r.width / r.height - 16 / 9) < 0.01
+                   const ar = r.width / r.height;
+                   return r.width > 100 && (Math.abs(ar - 16 / 9) < 0.01 || Math.abs(ar - 9 / 16) < 0.01)
                        && !!d.querySelector('.stage');
                  });
           if (!el) return { error: 'FRAME_NOT_FOUND' };
@@ -143,7 +144,7 @@ object JsContracts {
     // Auto-fit for non-conforming pages: content bounds in CSS px at t=0
     // (every visible element's getBoundingClientRect union, fixed included).
     // The engine contain-fits these into the CSS viewport - which mirrors the
-    // 16:9 output canvas because the WebView is laid out at W x H.
+    // output canvas because the WebView is laid out at W x H.
     val CONTENT_BOUNDS_JS = """
         (() => {
           const de = document.documentElement;

@@ -160,7 +160,39 @@ window.__broll = { seek(t) { /* render exact state at t seconds */ }, duration()
 - Native `<video>` or `<audio>` elements of any kind — the renderer has no frame-accurate seek path for them; any b-roll motion must be built as CSS/SVG/canvas responding to `__broll.seek()`.
 - Timeline, scrubber, or progress-bar UI of any visual style (see Part 1).
 - Typography smaller than `2.2cqh` anywhere in the frame.
+════════ PART 4B — VERTICAL (9:16) OVERRIDE ════════
 
+Activate this ENTIRE section when the request asks for vertical, 9:16,
+portrait, or Shorts / TikTok / Reels format; otherwise the default 16:9
+contract applies unchanged. Everything this section does not override
+stays exactly as written in Parts 1-4.
+
+**Frame geometry - replaces the `.fit` rule in Part 4:**
+
+```html
+    .fit {
+      aspect-ratio: 9/16;
+      container-type: size;
+      overflow: hidden;
+      width: 100vw;
+      max-width: calc(100vh * 9 / 16);
+      position: relative;
+      background: var(--bg-void);
+      color: var(--ink);
+    }
+```
+
+**Vertical staging - replaces DUAL-ZONE STAGING in Part 1:**
+- Stack vertically: ZONE A (Visual Vehicle Stage) on top at ~55% of the
+  frame height; ZONE B (Software Artifact Dock) below at ~38%; between
+  them a horizontal gutter band (~7% height) of guaranteed negative space
+  that nothing touches or crosses.
+- One column of attention: the hero visual spans the full frame width;
+  artifacts dock as full-width panels. Never side-by-side zones.
+- MODAL FOCUS, gutter discipline, CAPTION CLEARANCE (bottom 22% reserved),
+  and every anti-collision rule remain in force unchanged.
+- `cqh`/`cqw` units self-adapt to the tall container - the 2.2cqh minimum
+  still applies at the same physical proportion.
 ═══ PART 5 — DELIVERABLE FORMAT ════════
 
 1. **CREATIVE SYNTHESIS** — chosen visual vehicle (confirmed unused this session), aesthetic tone, target duration, Continuity Carry-Forward statement, Google font pairing, semantic palette, artifact plan.

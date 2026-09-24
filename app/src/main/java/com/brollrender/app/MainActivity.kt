@@ -68,8 +68,37 @@ class MainActivity : Activity() {
     // PICK settings
     private var resW = 1920
     private var resH = 1080
+    private var portrait = false // true = 9:16 output (resW/resH swapped)
     private var fps = 30
     private var bitRate = 20_000_000 // Mbps x 1e6 - user-adjustable on preview
+
+    // Resolution preset (long edge, short edge), applied in the current ratio.
+    private fun applyRes(long: Int, short: Int) {
+        if (portrait) {
+            resW = short
+            resH = long
+        } else {
+            resW = long
+            resH = short
+        }
+    }
+
+    // Toggle the output ratio (16:9 <-> 9:16); swaps the live resolution.
+    private fun setRatio(p: Boolean) {
+        if (p == portrait) return
+        portrait = p
+        val t = resW
+        resW = resH
+        resH = t
+    }
+
+    // Size-preset index from the current resolution (ratio-independent).
+    private fun resPresetIndex(): Int {
+        val longEdge = maxOf(resW, resH)
+        return if (longEdge == 3840) 0 else if (longEdge == 1920) 1 else if (longEdge == 1280) 2 else 3
+    }
+
+    private fun ratioIndex(): Int = if (portrait) 1 else 0
 
     // PREVIEW state
     private var htmlFile: File? = null
@@ -499,15 +528,23 @@ class MainActivity : Activity() {
         }
         col.addView(spacer(dp(24)))
 
+        toggleRow(
+            col, "RATIO",
+            listOf(
+                "16:9" to { setRatio(false) },
+                "9:16" to { setRatio(true) }
+            ),
+            ratioIndex()
+        )
         val qResRow = toggleRow(
             col, "RESOLUTION",
             listOf(
-                "4K" to { resW = 3840; resH = 2160 },
-                "1080p" to { resW = 1920; resH = 1080 },
-                "720p" to { resW = 1280; resH = 720 },
-                "480p" to { resW = 854; resH = 480 }
+                "4K" to { applyRes(3840, 2160) },
+                "1080p" to { applyRes(1920, 1080) },
+                "720p" to { applyRes(1280, 720) },
+                "480p" to { applyRes(854, 480) }
             ),
-            if (resW == 3840) 0 else if (resW == 1920) 1 else if (resW == 1280) 2 else 3
+            resPresetIndex()
         )
         val qFpsRow = toggleRow(
             col, "FPS",
@@ -522,15 +559,15 @@ class MainActivity : Activity() {
             col, "MODE",
             listOf(
                 "FINAL" to {
-                    qResRow.select(0); resW = 1920; resH = 1080
+                    qResRow.select(1); applyRes(1920, 1080)
                     qFpsRow.select(0); fps = 30
                 },
                 "DRAFT" to {
-                    qResRow.select(1); resW = 1280; resH = 720
+                    qResRow.select(2); applyRes(1280, 720)
                     qFpsRow.select(1); fps = 24
                 }
             ),
-            if (resW == 1920 && fps == 30) 0 else 1
+            if (maxOf(resW, resH) == 1920 && fps == 30) 0 else 1
         )
         toggleRow(
             col, "BITRATE",
@@ -776,7 +813,7 @@ class MainActivity : Activity() {
     private fun showErrorScreen(message: String) {
         val pad = dp(20)
         val validationHint =
-            "check: the HTML needs a .fit (16:9) element containing .stage, " +
+            "check: the HTML needs a .fit (16:9 or 9:16) element containing .stage, " +
                 "CSS keyframe animations, and webfonts that load"
         val renderHint =
             "renderer timeout: retry the render. This is not an HTML validation error."
@@ -899,7 +936,7 @@ class MainActivity : Activity() {
         fun rebuildFrame() {
             frameHolder.removeAllViews()
             if (manual) {
-                val zv = ZoomView(this, p.thumb, zoom)
+                val zv = ZoomView(this, p.thumb, zoom, resW.toFloat() / resH.toFloat())
                 zv.onTransform = { t ->
                     zoom = t
                     zoomLabel.text = String.format(
@@ -1052,23 +1089,58 @@ class MainActivity : Activity() {
             1
         )
 
+        // The engine sizes the render from prepare() (outW/outH), so a
+        // RATIO or RESOLUTION change must re-analyze: detection, thumbnail,
+        // and auto-fit are all target-relative. (Before this, the resolution
+        // toggle mutated resW/resH with no re-prepare - the render silently
+        // kept the prepare-time size.)
+        fun reprepare() {
+            val f = htmlFile ?: return
+            Thread {
+                runOnUiThread { showBusy("ANALYZING PAGE") }
+                val result = engine.prepare(f, resW, resH)
+                runOnUiThread {
+                    when (result) {
+                        is RenderEngine.PrepareResult.Ok -> showPreviewScreen(result)
+                        is RenderEngine.PrepareResult.Fail -> showErrorScreen(result.message)
+                    }
+                }
+            }.start()
+        }
+        // Apply a preset in the current ratio; re-analyze only on change.
+        fun setRes(long: Int, short: Int) {
+            val w = if (portrait) short else long
+            val h = if (portrait) long else short
+            if (resW == w && resH == h) return
+            resW = w
+            resH = h
+            reprepare()
+        }
+        toggleRow(
+            col, "RATIO",
+            listOf(
+                "16:9" to { if (portrait) { setRatio(false); reprepare() } },
+                "9:16" to { if (!portrait) { setRatio(true); reprepare() } }
+            ),
+            ratioIndex()
+        )
         val resRow = toggleRow(
             col, "RESOLUTION",
             listOf(
-                "4K" to { resW = 3840; resH = 2160 },
-                "1080p" to { resW = 1920; resH = 1080 },
-                "720p" to { resW = 1280; resH = 720 },
-                "480p" to { resW = 854; resH = 480 }
+                "4K" to { setRes(3840, 2160) },
+                "1080p" to { setRes(1920, 1080) },
+                "720p" to { setRes(1280, 720) },
+                "480p" to { setRes(854, 480) }
             ),
-            if (resW == 3840) 0 else if (resW == 1920) 1 else if (resW == 1280) 2 else 3
+            resPresetIndex()
         )
         toggleRow(
             col, "MODE",
             listOf(
-                "FINAL" to { resRow.select(1); resW = 1920; resH = 1080 },
-                "DRAFT" to { resRow.select(2); resW = 1280; resH = 720 }
+                "FINAL" to { resRow.select(1); setRes(1920, 1080) },
+                "DRAFT" to { resRow.select(2); setRes(1280, 720) }
             ),
-            if (resW == 1920) 0 else 1
+            if (maxOf(resW, resH) == 1920) 0 else 1
         )
 
         // ENHANCE: honest naming - a color grade (contrast ~1.12 around
@@ -1984,15 +2056,23 @@ class MainActivity : Activity() {
         }
         col.addView(spacer(dp(24)))
 
+        toggleRow(
+            col, "RATIO",
+            listOf(
+                "16:9" to { setRatio(false) },
+                "9:16" to { setRatio(true) }
+            ),
+            ratioIndex()
+        )
         val qResRow = toggleRow(
             col, "RESOLUTION",
             listOf(
-                "4K" to { resW = 3840; resH = 2160 },
-                "1080p" to { resW = 1920; resH = 1080 },
-                "720p" to { resW = 1280; resH = 720 },
-                "480p" to { resW = 854; resH = 480 }
+                "4K" to { applyRes(3840, 2160) },
+                "1080p" to { applyRes(1920, 1080) },
+                "720p" to { applyRes(1280, 720) },
+                "480p" to { applyRes(854, 480) }
             ),
-            if (resW == 3840) 0 else if (resW == 1920) 1 else if (resW == 1280) 2 else 3
+            resPresetIndex()
         )
         val qFpsRow = toggleRow(
             col, "FPS",
@@ -2007,15 +2087,15 @@ class MainActivity : Activity() {
             col, "MODE",
             listOf(
                 "FINAL" to {
-                    qResRow.select(0); resW = 1920; resH = 1080
+                    qResRow.select(1); applyRes(1920, 1080)
                     qFpsRow.select(0); fps = 30
                 },
                 "DRAFT" to {
-                    qResRow.select(1); resW = 1280; resH = 720
+                    qResRow.select(2); applyRes(1280, 720)
                     qFpsRow.select(1); fps = 24
                 }
             ),
-            if (resW == 1920 && fps == 30) 0 else 1
+            if (maxOf(resW, resH) == 1920 && fps == 30) 0 else 1
         )
         toggleRow(
             col, "BITRATE",

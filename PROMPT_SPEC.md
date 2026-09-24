@@ -23,7 +23,7 @@ RENDER → DONE. No screen recording, no editor crop, no resampling blur.
 ## How the app frames the file (in order)
 
 1. `.fit` / `#video-frame` found and fills the canvas (±2 px) → AUTO, LOCKED.
-2. 16:9 frame found but SMALLER → FRAME-FIT: CSS re-rasterization scales it
+2. Target-ratio frame found but SMALLER → FRAME-FIT: CSS re-rasterization scales it
    to fill the video. Text/SVG at full output resolution, never bitmap upscale.
 3. No frame at all → content-bounds contain-fit.
 4. Any case → MANUAL framing (pinch/drag, CROP handles, FULL/CENTER presets).
@@ -67,7 +67,7 @@ Any pairing works. FONTS_KICK re-inserts links + explicit document.fonts.load().
 - H.264 AVC High Profile, VBR (quality-biased, bitrate = ceiling).
 - I-frame interval: 1s (editor-friendly scrubbing).
 - CBR fallback if device rejects VBR/High Profile.
-- Resolutions: 480p / 720p / 1080p. FPS: 24 / 30 / 60.
+- Resolutions: 480p / 720p / 1080p / 4K, each in 16:9 or 9:16 (RATIO toggle). FPS: 24 / 30 / 60.
 - Bitrate options: 8 / 16 / 24 Mbps.
 - Audio: AAC 44.1kHz mono 96kbps.
 

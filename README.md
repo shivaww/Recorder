@@ -1,6 +1,6 @@
 # Nexon Studio
 
-Pocket production studio: HTML motion clips -> pixel-exact 16:9 MP4s, and scripts -> Qwen3-TTS voice audio. Renders on this phone or on a Kaggle GPU farm. Zero third-party code; no screen capture, no ffmpeg.
+Pocket production studio: HTML motion clips -> pixel-exact 16:9 and 9:16 MP4s, and scripts -> Qwen3-TTS voice audio. Renders on this phone or on a Kaggle GPU farm. Zero third-party code; no screen capture, no ffmpeg.
 
 ## Design
 
@@ -19,7 +19,7 @@ The home screen is two engine cards — **PIXEL** (video) and **VOICE** (audio),
 **PIXEL flow** — the pipeline rail (SOURCE · FRAME · RENDER · EXPORT, carrying each step's captured decision) persists across every screen:
 
 1. **SOURCE** - Choose HTML (system file picker, `text/html`) or paste code.
-2. **FRAME** - preview with AUTO (amber brackets lock the DOM-detected 16:9 frame) or MANUAL framing (pinch/drag zoom+pan, editor-style CROP with corner handles + thirds grid, FULL/CENTER presets). Resolution 480p/720p/1080p/4K, FPS 24/30/60, BITRATE, ENHANCE, SFX (when the page declares #sfx events) and editable duration (5-600 s) live on this screen.
+2. **FRAME** - preview with AUTO (amber brackets lock the DOM-detected 16:9 or 9:16 frame) or MANUAL framing (pinch/drag zoom+pan, editor-style CROP with corner handles + thirds grid, FULL/CENTER presets). RATIO 16:9/9:16 (swaps output width/height), Resolution 480p/720p/1080p/4K, FPS 24/30/60, BITRATE, ENHANCE, SFX (when the page declares #sfx events) and editable duration (5-600 s) live on this screen.
 3. **RENDER** - progress bar with `frame N/T - r f/s - ETA`; CANCEL aborts cleanly (encoder released, partial file deleted).
 4. **EXPORT** - file card read back with MediaMetadataRetriever: name, size, duration, resolution, VERIFIED/MISMATCH line. OPEN / SHARE / RENDER ANOTHER.
 
@@ -27,7 +27,7 @@ Output lands in `Movies/NexonStudio/NexonStudio_<stamp>.mp4`, with `Pictures/Nex
 
 ## Manual framing - no quality loss
 
-Zoom and crop are applied as a CSS transform on the page itself, so content re-rasterizes at the output resolution - crisp text and vectors at any zoom, never a bitmap upscale of the capture. Known limits: `position:fixed` elements and `vw/vh`-sized layout will not pan; raster images soften when zoomed. Conforming HTML (a `.fit` 16:9 frame containing `.stage`) still auto-detects; non-conforming HTML falls back to manual framing instead of aborting, initialized by an automatic content-bounds fit (contain + center) so phone-authored pages fill the frame instead of rendering small in the void. The one hard requirement: at least one CSS animation - the whole engine scrubs `document.getAnimations()`.
+Zoom and crop are applied as a CSS transform on the page itself, so content re-rasterizes at the output resolution - crisp text and vectors at any zoom, never a bitmap upscale of the capture. Known limits: `position:fixed` elements and `vw/vh`-sized layout will not pan; raster images soften when zoomed. Conforming HTML (a `.fit` 16:9 or 9:16 frame containing `.stage`) still auto-detects; non-conforming HTML falls back to manual framing instead of aborting, initialized by an automatic content-bounds fit (contain + center) so phone-authored pages fill the frame instead of rendering small in the void. The one hard requirement: at least one CSS animation - the whole engine scrubs `document.getAnimations()`.
 
 ## ENHANCE - honest naming
 
@@ -35,7 +35,7 @@ A color grade (contrast ~1.12 around mid-gray + saturation 1.18) applied as a ro
 
 ## HTML contract
 
-- The 16:9 video frame is `<div class="fit">` (CSS `aspect-ratio: 16/9`, contains `.stage`); `#video-frame` is also supported. Everything outside it is crop chrome; `?headless=1` (plus an injected class) hides it.
+- The video frame is `<div class="fit">` (CSS `aspect-ratio: 16/9`, or `9/16` for vertical - generation prompt Part 4B; contains `.stage`); `#video-frame` is also supported. Everything outside it is crop chrome; `?headless=1` (plus an injected class) hides it.
 - All motion is CSS animations; the timeline is scrubbed via `document.getAnimations()` + `currentTime`.
 - Webfonts: every family requested via the page's Google Fonts `<link>` is checked (default pairing Anton + IBM Plex Mono; deviations allowed). A requested font that has not loaded stops preparation instead of silently rendering narrower fallback glyphs; retry once it is available, then WebView caches it.
 - Page void background: `#0A0C10` (the renderer's canvas pre-fill matches it).
