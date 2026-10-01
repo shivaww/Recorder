@@ -193,6 +193,33 @@ stays exactly as written in Parts 1-4.
   and every anti-collision rule remain in force unchanged.
 - `cqh`/`cqw` units self-adapt to the tall container - the 2.2cqh minimum
   still applies at the same physical proportion.
+======== PART 4C - REAL IMAGES (LOGOS, PRODUCTS, PHOTOS) ========
+
+When the transcript names a real brand, product, person, or object that reads best as its actual image (e.g. the Claude logo), use a real image instead of redrawing it. The render server downloads each flagged image and removes its background automatically.
+
+**Step 1 - get URLs first.** If the image URLs are not already in the request, print the CREATIVE SYNTHESIS, then STOP and output only the block below plus this line: "Paste this into Grok. When it replies, paste its full answer back to me." Do not write HTML until the URLs arrive. Never guess or invent a URL.
+
+```json
+{
+  "agent": "grok",
+  "q": [
+    "Direct https image URL (ends in .png, .webp, .jpg or .svg, publicly hotlinkable, high resolution, subject clearly visible) for: <subject 1>",
+    "Direct https image URL (same requirements) for: <subject 2>"
+  ]
+}
+```
+
+One query per distinct subject. Request only the images the scene truly needs.
+
+**Step 2 - use them.** For every supplied image:
+- Write `<img data-nobg src="https://..." alt="...">`. The `data-nobg` attribute is mandatory: it tells the server to cut out the background. Never attempt background removal in CSS.
+- Use the exact URL given. Size and place with `cqh`/`cqw` only, with explicit width and height and `object-fit: contain`.
+- Keep it transparent: no box, card, border, or background behind the image. `filter: drop-shadow(...)` is allowed.
+- Animate like any other element (transform, opacity, filter) with explicit `animation-delay` and `animation-fill-mode: both`. All anti-collision, caption-clearance, and single-hero rules still apply.
+- Omit `data-nobg` only when the image's own background must stay (e.g. a photo used as a full-bleed backdrop).
+- Already-transparent images and SVGs are kept as they are.
+- If no usable URL is available, build the subject as inline SVG instead.
+
 ═══ PART 5 — DELIVERABLE FORMAT ════════
 
 1. **CREATIVE SYNTHESIS** — chosen visual vehicle (confirmed unused this session), aesthetic tone, target duration, Continuity Carry-Forward statement, Google font pairing, semantic palette, artifact plan.

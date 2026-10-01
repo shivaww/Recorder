@@ -50,7 +50,7 @@ def install_deps():
     step("STEP 1/5: Installing dependencies")
 
     print("  -> pip install playwright numpy...", flush=True)
-    run_live([sys.executable, "-m", "pip", "install", "playwright", "numpy"])
+    run_live([sys.executable, "-m", "pip", "install", "playwright", "numpy", "pillow", "rembg[cpu]"])
 
     print("  -> playwright install chromium (takes a few minutes)...", flush=True)
     run_live(["playwright", "install", "--with-deps", "chromium"])
@@ -94,6 +94,12 @@ def install_deps():
         print("  -> Vulkan: NVIDIA device visible")
     else:
         print("  -> WARNING: vulkaninfo shows no NVIDIA device; Chromium will fall back to CPU")
+
+    print("  -> prefetching background-removal model...", flush=True)
+    try:
+        run_live([sys.executable, "-c", "from rembg import new_session; new_session('isnet-general-use')"])
+    except Exception as e:
+        print(f"  -> WARNING: rembg model prefetch failed: {e}", flush=True)
 
     print("  Dependencies installed.")
 

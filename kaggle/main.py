@@ -25,6 +25,7 @@ from preflight import run_preflight
 from validator import validate_html
 from renderer import render_frames, RenderError
 from sfx import mix_audio
+from assets import process_assets
 from encoder import encode_video, EncodeError
 from telemetry import JobTelemetry, get_gpu_usage
 
@@ -188,6 +189,11 @@ def validate_job(job_id):
         resolution = job["resolution"]
 
     width, height = map(int, resolution.split("x"))
+    try:
+        stats = process_assets(html_path, os.path.dirname(html_path))
+        print(f"[assets] job={job_id} {stats}", flush=True)
+    except Exception as e:
+        print(f"[assets] job={job_id} skipped: {type(e).__name__}: {e}", flush=True)
     result = validate_html(html_path, width, height)
     auto_dur = result.get("duration_s")
     print(f"[validate] job={job_id} valid={result['valid']} reason={result.get('reason')} auto_duration={auto_dur}", flush=True)
