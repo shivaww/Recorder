@@ -75,7 +75,7 @@ All motion is deterministic, scrub-safe, and timed exactly to spoken syllables. 
 - **Camera moves:** simulate push-ins/pulls between beats via a `scale()`/`translate()` transform on the `.fit` wrapper (subtle — 3–8% scale shifts), so beat transitions read as directed cuts, not card-swaps.
 - **One hero beat per scene:** at the single most important reveal, allow a full-bleed break from the dual-zone grid — the visual vehicle may take the entire frame for that one beat, then return to the standard layout.
 
-**Caption emphasis:** within the reserved caption zone, highlight the currently-spoken word (color shift or weight change) in sync with the VO — not the whole line lighting up at once.
+**Caption emphasis:** within the reserved caption zone, highlight the currently-spoken word (color shift or weight change) in sync with the VO — not the whole line lighting up at once. Every word lives in its own span, and a real space character (or `&nbsp;`) must sit between consecutive word spans in the markup; never rely on span adjacency or letter-spacing for word gaps. The rendered caption must read as normal spaced text, and the caption must wrap inside the reserved zone without clipping.
 
 **Lifecycle Discipline:**
 - Artifact Entrance: translate `+3cqh`, opacity 0→1, on `--snap` over 250–350ms.
@@ -209,21 +209,43 @@ When the transcript names a real brand, product, person, or object that reads be
 }
 ```
 
-One query per distinct subject. Request only the images the scene truly needs.
+One query per distinct subject. Request only the images the scene truly needs, and never request the same subject twice. Ask for the official full-color mark on a transparent or plain background. If the mark is mostly dark and the scene is dark (or mostly white on a light scene), ask for the light/white variant instead.
 
-**Step 2 - use them.** For every supplied image:
+**Step 2 - markup.** For every supplied image:
 - Write `<img data-nobg src="https://..." alt="...">`. The `data-nobg` attribute is mandatory: it tells the server to cut out the background. Never attempt background removal in CSS.
 - Use the exact URL given. Size and place with `cqh`/`cqw` only, with explicit width and height and `object-fit: contain`.
-- Keep it transparent: no box, card, border, or background behind the image. `filter: drop-shadow(...)` is allowed.
+- Never stretch, crop, rotate, skew, or recolor a logo. The only filter allowed on it is `drop-shadow(...)`.
+- Keep it transparent: no box, card, border, or background behind the image.
 - Animate like any other element (transform, opacity, filter) with explicit `animation-delay` and `animation-fill-mode: both`. All anti-collision, caption-clearance, and single-hero rules still apply.
 - Omit `data-nobg` only when the image's own background must stay (e.g. a photo used as a full-bleed backdrop).
 - Already-transparent images and SVGs are kept as they are.
+- If the same logo appears in several beats, reuse the same URL string.
 - If no usable URL is available, build the subject as inline SVG instead.
+
+**Step 3 - WHEN a logo appears.**
+- Only for brands or products named in this transcript span. No decorative, implied, or filler logos.
+- Entrance starts 100-200ms before the spoken timestamp of its name (read it from the SRT) and is fully visible by the end of that word. Never after the word.
+- It stays while its subject is being discussed, then exits (or dims to 25% opacity) when the next distinct subject is named. It never lingers into an unrelated beat.
+- Logos follow Lifecycle Discipline: entrance on `--snap` over 250-350ms (opacity 0 to 1, scale 0.9 to 1), exit over 150-250ms.
+- Every logo entrance is listed in the BEAT TABLE with its exact timestamp.
+
+**Step 4 - WHERE and how big.**
+- Place logos in ZONE A or in the single full-bleed hero beat. Never in ZONE B over a software artifact, never in the gutter, never in the bottom 22% caption zone, and keep a 4cqh safe margin from every frame edge.
+- One logo: icon-shaped (aspect ratio up to 1.6) height 18cqh to 30cqh; wide wordmark (aspect ratio above 1.6) width 22cqw to 34cqw.
+- Two to four logos in one beat: each 12cqh to 20cqh, equal visual weight, gaps of at least 3cqh, aligned on a shared row or column, centered in the zone.
+- Roster beat: when the transcript lists five or more named items, the scene's single full-bleed hero beat may be a roster showing up to 12 logos in an even grid. The grid stays inside the top 78% of the frame, with equal cells and equal gaps. Logos enter one at a time in spoken order, each timed to its own word. Wordmarks scale by width so their visual weight matches the icons beside them.
+- Connectors (arrows, lines, flows) attach to the logo's bounding box edge with 1.5cqh clearance and never cross over a logo.
+- No text label under a logo unless it states a fact the logo cannot carry.
+- In 9:16, stack logos in ZONE A at full width using the same size ranges; roster grids use at most 3 columns.
+
+**Step 5 - legibility.**
+- Every logo must contrast with the scene void. For a dark mark on a dark scene (or white on light), use the light variant requested in Step 1 or choose a contrasting void. Never add a card or box to fix it.
+- Marks that carry their own solid shape (e.g. a black rounded-square app icon) keep it; that is the logo's artwork, not a background.
 
 ═══ PART 5 — DELIVERABLE FORMAT ════════
 
 1. **CREATIVE SYNTHESIS** — chosen visual vehicle (confirmed unused this session), aesthetic tone, target duration, Continuity Carry-Forward statement, Google font pairing, semantic palette, artifact plan.
 2. **BEAT TABLE:** `Timestamp | Spoken Beat | Visual Stage Event | Software Artifact Action | SFX ID`
-3. **MANIFEST:** Duration (matching the `#duration` JSON exactly), Chosen Visual Vehicle, Active Window Count, SFX Count.
+3. **MANIFEST:** Duration (matching the `#duration` JSON exactly), Chosen Visual Vehicle, Active Window Count, SFX Count, Logo Count (equal to the number of `data-nobg` images).
 4. **THE COMPLETE, SELF-CONTAINED HTML FILE** (inline CSS + inline SVG/Canvas + JSON sound + `#duration` block).
-5. **RENDER VERIFICATION:** timecode check for UI appearances, audio sync, and confirmation the `#duration` block matches the manifest.
+5. **RENDER VERIFICATION:** timecode check for UI appearances, audio sync, and confirmation the `#duration` block matches the manifest, plus a logo check: each logo's entrance time against its spoken word, and a note that no logo sits in the caption zone or the gutter.
