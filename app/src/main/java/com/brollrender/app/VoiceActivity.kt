@@ -48,7 +48,7 @@ class VoiceActivity : Activity() {
 
         /** The paragraph the user reads aloud for voice cloning. Sent to the
          *  server as the reference transcript — always English. */
-        val CLONE_SCRIPT = "Hello, and welcome. I\u2019m here to help you turn your ideas into clear, natural, and confident conversations. Whether you\u2019re exploring something exciting, explaining a complex thought, or simply enjoying a quiet moment, I\u2019ll keep my voice warm, steady, and easy to follow. Listen to the subtle changes in rhythm, emphasis, and expression as each sentence flows naturally into the next."
+        val CLONE_SCRIPT = "Hello, and welcome. I\u2019m here to help you turn your ideas into clear, natural, and confident conversations. Whether you\u2019re exploring something exciting or explaining a complex thought, I\u2019ll keep my voice warm, steady, and easy to follow."
 
         /** One command that boots the voice server on a Kaggle GPU notebook. */
         const val BOOTSTRAP_CMD =
@@ -740,9 +740,9 @@ class VoiceActivity : Activity() {
         col.addView(spacer(dp(6)))
         col.addView(bodyTv(
             "Record in a quiet place, in exactly your own tone and style. " +
-                "Read the text below out loud exactly as written — no need to finish the whole " +
-                "paragraph, the first 15 seconds are enough, and no need to rush. Read at your " +
-                "comfortable pace.",
+                "Read the entire short paragraph below out loud exactly as written. " +
+                "Pronounce every word fully — clear consonants and word endings are " +
+                "what the clone learns from. No need to rush, read at your comfortable pace.",
             13, TXT2))
         col.addView(spacer(dp(12)))
         val card = LinearLayout(this).apply {

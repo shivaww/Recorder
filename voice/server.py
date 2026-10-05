@@ -69,7 +69,7 @@ MAX_CHUNK_CHARS = 500
 # truncated: ref_text must stay a transcript of the whole clip.
 MAX_REF_SECONDS = 30
 # Cap runaway generations and reduce sampling randomness.
-GEN_KWARGS = {"max_new_tokens": 2048, "temperature": 0.7}
+GEN_KWARGS = {"max_new_tokens": 2048, "temperature": 0.5}
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # bf16 needs compute capability 8.0+. T4 and P100 lack it, and fp16 is unstable
 # for Qwen3-TTS, so those GPUs run fp32.
@@ -180,6 +180,8 @@ _YEAR_CTX = re.compile(r"\b(in|since|from|until|by|before|after|year|circa)\s+(1
 _MONEY = re.compile(r"\$(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)(\s+(?:thousand|million|billion))?", re.I)
 _PERCENT = re.compile(r"\b(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s*%")
 _NUMBER = re.compile(r"\b(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\b")
+_TEMP = re.compile(r"\b(\d+)\s*(?:°\s*([CF])|degrees?\s+([CF]))\b", re.I)
+_PHONE = re.compile(r"\b(\d{3})[\s.\-](\d{3})[\s.\-](\d{3,4})\b")
 _ABBR = [
     (re.compile(r"\bDr\."), "Doctor"),
     (re.compile(r"\bMr\."), "Mister"),
@@ -261,6 +263,16 @@ def _year_words(y: int) -> str:
     return _int_words(hi) + " " + _int_words(lo)
 
 
+def _temp_words(m) -> str:
+    unit = "Celsius" if (m.group(2) or m.group(3)).upper() == "C" else "Fahrenheit"
+    return f"{_num_words(m.group(1))} degrees {unit}"
+
+
+def _phone_words(m) -> str:
+    groups = (m.group(1), m.group(2), m.group(3))
+    return ", ".join(" ".join(_ONES[int(d)] for d in g) for g in groups)
+
+
 def _money(m) -> str:
     amt, scale = m.group(1), (m.group(2) or "").strip()
     if scale:
@@ -280,6 +292,8 @@ def _money(m) -> str:
 
 
 def _expand_numbers(text: str) -> str:
+    text = _PHONE.sub(_phone_words, text)
+    text = _TEMP.sub(_temp_words, text)
     text = _TIME.sub(_time_words, text)
     text = _ORDINAL.sub(lambda m: _ord_words(int(m.group(1))), text)
     text = _YEAR_CTX.sub(lambda m: f"{m.group(1)} {_year_words(int(m.group(2)))}", text)
@@ -417,9 +431,9 @@ def _pause_for(chunk_text, sr, default_ms=150.0):
     """Inter-chunk pause length driven by the chunk's final punctuation."""
     t = (chunk_text or "").rstrip()
     if t and t[-1] in ".!?\u2026":
-        ms = 200.0
+        ms = 350.0
     elif t and t[-1] in ",;:":
-        ms = 110.0
+        ms = 180.0
     else:
         ms = default_ms
     return int(sr * ms / 1000.0)
@@ -544,11 +558,18 @@ def generate():
                 # m4a/aac: libsndfile can't open it, so convert with ffmpeg
                 tmp_in = ref_path + ".in"
                 os.replace(ref_path, tmp_in)
-                subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", tmp_in, "-ac", "1", ref_path], check=True, capture_output=True)
+                subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", tmp_in, "-ac", "1", "-ar", "24000", ref_path], check=True, capture_output=True)
                 os.remove(tmp_in)
                 data, sr = sf.read(ref_path, always_2d=True)
             if data.shape[1] > 1:
                 data = data[:, :1]
+            if sr != 24000:
+                # Match the vocoder's native rate: a reference clip at a
+                # foreign rate smears dense sibilant clusters during cloning.
+                ref_t = torch.from_numpy(np.ascontiguousarray(data.T)).float()
+                ref_t = torchaudio.functional.resample(ref_t, sr, 24000)
+                data = ref_t.numpy().T
+                sr = 24000
             if len(data) > int(sr * MAX_REF_SECONDS):
                 return jsonify(error=f"reference audio is longer than {MAX_REF_SECONDS}s: trim the clip and its ref_text together"), 400
             sf.write(ref_path, data, sr)
