@@ -65,6 +65,9 @@ os.makedirs(OUT_DIR, exist_ok=True)
 
 VO_MARKER = "{here complete voice over}"
 MAX_CHUNK_CHARS = 500
+# Longest reference clip accepted for cloning, in seconds. Clips are never
+# truncated: ref_text must stay a transcript of the whole clip.
+MAX_REF_SECONDS = 30
 # Cap runaway generations and reduce sampling randomness.
 GEN_KWARGS = {"max_new_tokens": 2048, "temperature": 0.7}
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -530,9 +533,10 @@ def generate():
     if mode == "clone" and "ref_audio" in request.files and request.files["ref_audio"].filename:
         ref_path = os.path.join(OUT_DIR, f"ref_{uuid.uuid4().hex[:8]}.wav")
         request.files["ref_audio"].save(ref_path)
-        # Normalize the reference: decode via soundfile, force mono, keep only
-        # the first 15 seconds, rewrite as WAV. Any decodable upload format
-        # (wav/mp3/flac/ogg) becomes clean model input.
+        # Normalize the reference: decode via soundfile, force mono, rewrite as
+        # WAV. Never cut it: ref_text transcribes the WHOLE clip, and a clip
+        # chopped mid-sentence no longer matches it, so the model speaks the
+        # leftover reference words in the output.
         try:
             try:
                 data, sr = sf.read(ref_path, always_2d=True)
@@ -540,14 +544,13 @@ def generate():
                 # m4a/aac: libsndfile can't open it, so convert with ffmpeg
                 tmp_in = ref_path + ".in"
                 os.replace(ref_path, tmp_in)
-                subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", tmp_in, "-t", "15", "-ac", "1", ref_path], check=True, capture_output=True)
+                subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", tmp_in, "-ac", "1", ref_path], check=True, capture_output=True)
                 os.remove(tmp_in)
                 data, sr = sf.read(ref_path, always_2d=True)
             if data.shape[1] > 1:
                 data = data[:, :1]
-            max_len = int(sr * 15)
-            if len(data) > max_len:
-                data = data[:max_len]
+            if len(data) > int(sr * MAX_REF_SECONDS):
+                return jsonify(error=f"reference audio is longer than {MAX_REF_SECONDS}s: trim the clip and its ref_text together"), 400
             sf.write(ref_path, data, sr)
         except Exception as e:
             return jsonify(error=f"cannot read reference audio ({e})"), 400
