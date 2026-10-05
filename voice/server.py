@@ -491,6 +491,7 @@ def health():
 
 @app.route("/generate", methods=["POST"])
 def generate():
+    print(f"/generate ctype={request.content_type!r} form={list(request.form.keys())} files={list(request.files.keys())} json={request.is_json}")
     text = request.form.get("text", "")
     if "file" in request.files and request.files["file"].filename:
         text = request.files["file"].read().decode("utf-8", errors="ignore")
