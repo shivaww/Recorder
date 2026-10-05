@@ -107,7 +107,8 @@ class VoiceApi(private val baseUrl: String) {
             out.write("--$boundary--\r\n".toByteArray())
             out.flush()
             if (conn.responseCode !in 200..299) {
-                lastError = "HTTP ${conn.responseCode}"
+                val errBody = try { conn.errorStream?.bufferedReader()?.readText()?.take(200) } catch (e: Exception) { null }
+                lastError = "HTTP ${conn.responseCode}" + (if (errBody.isNullOrBlank()) "" else " - $errBody")
                 return null
             }
             val resp = conn.inputStream.bufferedReader().readText()
