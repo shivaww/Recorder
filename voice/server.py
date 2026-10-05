@@ -489,6 +489,13 @@ def health():
     )
 
 
+@app.errorhandler(400)
+def _bad_request(e):
+    desc = getattr(e, "description", str(e))
+    print(f"400 {request.method} {request.path} ctype={request.content_type!r} len={request.content_length} desc={desc}")
+    return jsonify(error=str(desc)), 400
+
+
 @app.route("/generate", methods=["POST"])
 def generate():
     print(f"/generate ctype={request.content_type!r} form={list(request.form.keys())} files={list(request.files.keys())} json={request.is_json}")
