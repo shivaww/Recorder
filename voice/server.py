@@ -534,7 +534,15 @@ def generate():
         # the first 15 seconds, rewrite as WAV. Any decodable upload format
         # (wav/mp3/flac/ogg) becomes clean model input.
         try:
-            data, sr = sf.read(ref_path, always_2d=True)
+            try:
+                data, sr = sf.read(ref_path, always_2d=True)
+            except Exception:
+                # m4a/aac: libsndfile can't open it, so convert with ffmpeg
+                tmp_in = ref_path + ".in"
+                os.replace(ref_path, tmp_in)
+                subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", tmp_in, "-t", "15", "-ac", "1", ref_path], check=True, capture_output=True)
+                os.remove(tmp_in)
+                data, sr = sf.read(ref_path, always_2d=True)
             if data.shape[1] > 1:
                 data = data[:, :1]
             max_len = int(sr * 15)
