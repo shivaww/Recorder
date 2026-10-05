@@ -36,6 +36,16 @@ if ! python -c "import flask, flask_cors, soundfile, qwen_tts" 2>/dev/null; then
   exit 1
 fi
 note "flask, flask-cors, soundfile, qwen-tts ready"
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  note "ffmpeg missing - installing (converts m4a/aac voice samples)"
+  apt-get update -qq >/dev/null 2>&1
+  apt-get install -y -qq ffmpeg >/dev/null 2>&1
+fi
+if command -v ffmpeg >/dev/null 2>&1; then
+  note "ffmpeg ready"
+else
+  note "WARNING: ffmpeg install failed - only WAV/FLAC/OGG voice samples will work"
+fi
 if python -c "import torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)"; then
   note "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n 1)"
 else
