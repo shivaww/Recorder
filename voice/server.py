@@ -84,15 +84,39 @@ MODELS = {
 
 # Lazy-loaded models (to save VRAM)
 _loaded = {}
+_loaded_dev = {}
+
+
+def _device_for(mode: str) -> str:
+    """Spread models across GPUs: custom->0, clone->1, design->0 (2 GPUs)."""
+    if DEVICE != "cuda":
+        return "cpu"
+    order = ["custom", "clone", "design"]
+    return f"cuda:{order.index(mode) % torch.cuda.device_count()}"
+
+
+def _evict_device(dev: str):
+    """Unload any model already holding this device so the next one fits."""
+    for m in [k for k, d in _loaded_dev.items() if d == dev]:
+        print(f"Unloading {m} model from {dev} to free VRAM ...")
+        _loaded.pop(m, None)
+        _loaded_dev.pop(m, None)
+    import gc
+    gc.collect()
+    if DEVICE == "cuda":
+        torch.cuda.empty_cache()
+
 
 def get_model(mode: str):
     mode = mode.lower().strip()
     if mode not in MODELS:
         mode = "custom"
     if mode not in _loaded:
-        print(f"Loading {MODELS[mode]} ...")
+        dev = _device_for(mode)
+        _evict_device(dev)
+        print(f"Loading {MODELS[mode]} on {dev} ...")
         kwargs = {
-            "device_map": "cuda:0" if DEVICE == "cuda" else "cpu",
+            "device_map": dev,
             "dtype": MODEL_DTYPE,
         }
         if DEVICE == "cuda":
@@ -113,6 +137,7 @@ def get_model(mode: str):
                 _loaded[mode] = Qwen3TTSModel.from_pretrained(MODELS[mode], **kwargs)
             else:
                 raise
+        _loaded_dev[mode] = dev
         print(f"{mode} model ready")
     return _loaded[mode]
 
@@ -397,7 +422,25 @@ def _pause_for(chunk_text, sr, default_ms=150.0):
     return int(sr * ms / 1000.0)
 
 
+_dev_locks = {}
+_dev_locks_guard = threading.Lock()
+
+
+def _dev_lock(dev: str):
+    with _dev_locks_guard:
+        return _dev_locks.setdefault(dev, threading.RLock())
+
+
 def synthesize(mode, text, language, speaker, instruct, ref_audio, ref_text, design_prompt, job_id, speed=1.0, loudness=1.0):
+    """Serialize jobs per GPU so loads and evictions never overlap a running job."""
+    m = (mode or "custom").lower().strip()
+    if m not in MODELS:
+        m = "custom"
+    with _dev_lock(_device_for(m)):
+        return _synthesize_impl(mode, text, language, speaker, instruct, ref_audio, ref_text, design_prompt, job_id, speed, loudness)
+
+
+def _synthesize_impl(mode, text, language, speaker, instruct, ref_audio, ref_text, design_prompt, job_id, speed=1.0, loudness=1.0):
     model = get_model(mode)
     vo_text = extract_vo(text)
     chunks = chunk_text(vo_text)
@@ -442,6 +485,7 @@ def health():
         modes=["custom", "clone", "design"],
         models=MODELS,
         loaded=list(_loaded.keys()),
+        gpus=torch.cuda.device_count() if DEVICE == "cuda" else 0,
     )
 
 
