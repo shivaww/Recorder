@@ -65,7 +65,15 @@ os.makedirs(OUT_DIR, exist_ok=True)
 
 VO_MARKER = "{here complete voice over}"
 MAX_CHUNK_CHARS = 500
+# Cap runaway generations and reduce sampling randomness.
+GEN_KWARGS = {"max_new_tokens": 2048, "temperature": 0.7}
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+# bf16 needs compute capability 8.0+. T4 and P100 lack it, and fp16 is unstable
+# for Qwen3-TTS, so those GPUs run fp32.
+if DEVICE == "cuda" and torch.cuda.get_device_capability()[0] >= 8:
+    MODEL_DTYPE = torch.bfloat16
+else:
+    MODEL_DTYPE = torch.float32
 
 # Model IDs
 MODELS = {
@@ -85,7 +93,7 @@ def get_model(mode: str):
         print(f"Loading {MODELS[mode]} ...")
         kwargs = {
             "device_map": "cuda:0" if DEVICE == "cuda" else "cpu",
-            "dtype": torch.bfloat16 if DEVICE == "cuda" else torch.float32,
+            "dtype": MODEL_DTYPE,
         }
         if DEVICE == "cuda":
             # Use flash-attn only when actually importable; otherwise PyTorch
@@ -122,8 +130,176 @@ def extract_vo(text: str) -> str:
     return " ".join(p.strip() for p in parts[1:] if p.strip())
 
 
+CONTRACTIONS = {
+    "he's": "he is", "she's": "she is", "it's": "it is", "that's": "that is",
+    "what's": "what is", "there's": "there is", "here's": "here is",
+    "who's": "who is", "where's": "where is", "how's": "how is",
+}
+_CONTR_RE = re.compile(r"\b(" + "|".join(CONTRACTIONS) + r")\b", re.IGNORECASE)
+
+
+def _expand_contraction(m):
+    out = CONTRACTIONS[m.group(1).lower()]
+    return out.capitalize() if m.group(1)[0].isupper() else out
+
+
+_ONES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+         "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
+         "seventeen", "eighteen", "nineteen"]
+_TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+_SCALES = [(10 ** 9, "billion"), (10 ** 6, "million"), (1000, "thousand")]
+_YEAR_CTX = re.compile(r"\b(in|since|from|until|by|before|after|year|circa)\s+(1[1-9]\d\d|20\d\d)\b", re.I)
+_MONEY = re.compile(r"\$(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)(\s+(?:thousand|million|billion))?", re.I)
+_PERCENT = re.compile(r"\b(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s*%")
+_NUMBER = re.compile(r"\b(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\b")
+_ABBR = [
+    (re.compile(r"\bDr\."), "Doctor"),
+    (re.compile(r"\bMr\."), "Mister"),
+    (re.compile(r"\bMrs\."), "Missus"),
+    (re.compile(r"\bMs\."), "Miz"),
+    (re.compile(r"\bvs\.?(?=\s)", re.I), "versus"),
+    (re.compile(r"\be\.g\.", re.I), "for example"),
+    (re.compile(r"\bi\.e\.", re.I), "that is"),
+]
+
+
+_ORD_IRREG = {"one": "first", "two": "second", "three": "third", "five": "fifth",
+              "eight": "eighth", "nine": "ninth", "twelve": "twelfth"}
+_ORDINAL = re.compile(r"\b(\d+)(?:st|nd|rd|th)\b", re.I)
+_TIME = re.compile(r"\b(\d{1,2}):(\d{2})(?:\s*([ap])m\b)?", re.I)
+
+
+def _ord_words(n: int) -> str:
+    w = _int_words(n).split(" ")
+    last = w[-1]
+    if last in _ORD_IRREG:
+        w[-1] = _ORD_IRREG[last]
+    elif last.endswith("y"):
+        w[-1] = last[:-1] + "ieth"
+    else:
+        w[-1] = last + "th"
+    return " ".join(w)
+
+
+def _time_words(m) -> str:
+    h, mi = int(m.group(1)), int(m.group(2))
+    if h > 23 or mi > 59:
+        return m.group(0)
+    out = _int_words(h)
+    if mi == 0:
+        if not m.group(3):
+            out += " o'clock"
+    elif mi < 10:
+        out += " oh " + _int_words(mi)
+    else:
+        out += " " + _int_words(mi)
+    if m.group(3):
+        out += " " + m.group(3).upper() + " M"
+    return out
+
+
+def _int_words(n: int) -> str:
+    if n < 20:
+        return _ONES[n]
+    if n < 100:
+        t, o = divmod(n, 10)
+        return _TENS[t] + (" " + _ONES[o] if o else "")
+    if n < 1000:
+        h, r = divmod(n, 100)
+        return _ONES[h] + " hundred" + (" " + _int_words(r) if r else "")
+    for v, name in _SCALES:
+        if n >= v:
+            q, r = divmod(n, v)
+            return _int_words(q) + " " + name + (" " + _int_words(r) if r else "")
+    return str(n)
+
+
+def _num_words(s: str) -> str:
+    s = s.replace(",", "")
+    if "." in s:
+        a, b = s.split(".", 1)
+        return _int_words(int(a or 0)) + " point " + " ".join(_ONES[int(d)] for d in b)
+    return _int_words(int(s))
+
+
+def _year_words(y: int) -> str:
+    if 2000 <= y <= 2009:
+        return _int_words(y)
+    hi, lo = divmod(y, 100)
+    if lo == 0:
+        return _int_words(hi) + " hundred"
+    if lo < 10:
+        return _int_words(hi) + " oh " + _int_words(lo)
+    return _int_words(hi) + " " + _int_words(lo)
+
+
+def _money(m) -> str:
+    amt, scale = m.group(1), (m.group(2) or "").strip()
+    if scale:
+        return f"{_num_words(amt)} {scale} dollars"
+    if "." in amt:
+        whole, frac = amt.replace(",", "").split(".", 1)
+        if len(frac) == 2:
+            w = int(whole)
+            out = f"{_int_words(w)} {'dollar' if w == 1 else 'dollars'}"
+            c = int(frac)
+            if c:
+                out += f" and {_int_words(c)} {'cent' if c == 1 else 'cents'}"
+            return out
+        return _num_words(amt) + " dollars"
+    n = int(amt.replace(",", ""))
+    return f"{_int_words(n)} {'dollar' if n == 1 else 'dollars'}"
+
+
+def _expand_numbers(text: str) -> str:
+    text = _TIME.sub(_time_words, text)
+    text = _ORDINAL.sub(lambda m: _ord_words(int(m.group(1))), text)
+    text = _YEAR_CTX.sub(lambda m: f"{m.group(1)} {_year_words(int(m.group(2)))}", text)
+    text = _MONEY.sub(_money, text)
+    text = _PERCENT.sub(lambda m: _num_words(m.group(1)) + " percent", text)
+    return _NUMBER.sub(lambda m: _num_words(m.group(0)), text)
+
+
+def normalize_text(text: str) -> str:
+    """Clean text for TTS: the model does no normalization of its own."""
+    text = text.replace("\u2019", "'").replace("\u2018", "'")
+    text = text.replace("\u201c", '"').replace("\u201d", '"')
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    lines = [ln if ln[-1] in ".!?:;," else ln + "." for ln in lines]
+    text = " ".join(lines)
+    text = _CONTR_RE.sub(_expand_contraction, text)
+    for rx, rep in _ABBR:
+        text = rx.sub(rep, text)
+    text = re.sub(r"\s*&\s*", " and ", text)
+    text = _expand_numbers(text)
+    text = re.sub(r"\s*[\u2014\u2013]\s*", ", ", text)
+    text = text.replace("\u2026", ".")
+    text = re.sub(r"[*#`_~^|<>\[\]{}]", " ", text)
+    text = re.sub(r",\s*,", ",", text)
+    text = re.sub(r"\.{2,}", ".", text)
+    text = re.sub(r"\s+", " ", text)
+    return re.sub(r"\s+([,.;:!?])", r"\1", text).strip()
+
+
+def _split_long(s: str, max_chars: int):
+    """Split an over-long sentence at commas, semicolons, or colons."""
+    if len(s) <= max_chars:
+        return [s]
+    out, cur = [], ""
+    for p in re.split(r"(?<=[,;:])\s+", s):
+        if cur and len(cur) + len(p) + 1 > max_chars:
+            out.append(cur)
+            cur = p
+        else:
+            cur = f"{cur} {p}".strip()
+    if cur:
+        out.append(cur)
+    return out
+
+
 def chunk_text(text: str, max_chars: int = MAX_CHUNK_CHARS):
-    sentences = [s for s in SENT_SPLIT.split(text) if s]
+    text = normalize_text(text)
+    sentences = [x for s in SENT_SPLIT.split(text) if s for x in _split_long(s, max_chars)]
     chunks, cur = [], ""
     for s in sentences:
         if len(cur) + len(s) + 1 <= max_chars:
@@ -141,7 +317,7 @@ def generate_one(model, mode, text, language, speaker, instruct, ref_audio, ref_
     language = language or "Auto"
 
     if mode == "custom":
-        kwargs = {"text": text, "language": language, "speaker": speaker or "Ryan"}
+        kwargs = {"text": text, "language": language, "speaker": speaker or "Ryan", **GEN_KWARGS}
         if instruct and instruct.strip():
             kwargs["instruct"] = instruct.strip()
         if speed and abs(speed - 1.0) > 1e-6:
@@ -163,6 +339,7 @@ def generate_one(model, mode, text, language, speaker, instruct, ref_audio, ref_
             language=language,
             ref_audio=ref_audio,
             ref_text=ref_text.strip(),
+            **GEN_KWARGS,
         )
 
     elif mode == "design":
@@ -173,6 +350,7 @@ def generate_one(model, mode, text, language, speaker, instruct, ref_audio, ref_
             text=text,
             language=language,
             instruct=design_prompt.strip(),
+            **GEN_KWARGS,
         )
     else:
         raise ValueError(f"Unknown mode: {mode}")
