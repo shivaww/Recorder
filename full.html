@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Block 01 — The Contestant's Disclosure</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400;1,9..144,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg-void:#0D0B08; --surface:#17120D; --surface-2:#211A13;
+  --line:#3B2E1F; --line-soft:#271F14;
+  --ink:#F2E9DB; --ink-dim:#A3937F;
+  --clay:#E2744A; --mint:#59BD8C; --amber:#E2A24B;
+  --snap:cubic-bezier(.16,1,.3,1);
+  --draw:cubic-bezier(.45,.05,.55,.95);
+  --fd:'Fraunces',serif; --fm:'IBM Plex Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#000;overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.fit{
+  aspect-ratio:16/9;container-type:size;overflow:hidden;
+  width:100vw;max-width:calc(100vh * 16 / 9);position:relative;
+  background-color:var(--bg-void);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26'%3E%3Ccircle cx='1.5' cy='1.5' r='1.1' fill='%23181210'/%3E%3C/svg%3E");
+  background-size:3.5cqh 3.5cqh;
+  color:var(--ink);font-family:var(--fd);
+}
+.sentinel{position:absolute;width:.5cqh;height:.5cqh;opacity:0;animation:syncT 62.6s linear both}
+
+/* ---------- HUD ---------- */
+.hud{position:absolute;top:2.6cqh;left:3cqw;right:3cqw;display:flex;align-items:center;gap:1.4cqw;z-index:40}
+.chip{display:flex;align-items:center;gap:1cqh;font:500 1.95cqh var(--fm);color:var(--ink-dim);
+  padding:.95cqh 1.5cqh;border:.14cqh solid var(--line);border-radius:.8cqh;
+  background:rgba(23,18,13,.88);white-space:nowrap}
+.chip b{color:var(--ink);font-weight:600}
+.spk{animation:hudIn .35s var(--snap) .9s both}
+.cd{border-color:#5A4426;animation:hudIn .3s var(--snap) 16.5s both,pulseChip .5s var(--snap) 16.9s}
+.cd b{color:var(--amber)}
+.rec{margin-left:auto}
+.rdot{width:1.1cqh;height:1.1cqh;border-radius:50%;background:var(--clay);animation:blink 1.2s steps(1) infinite}
+.pdot{width:1.2cqh;height:1.2cqh;border-radius:50%;background:var(--clay);animation:softPulse 2.4s ease-in-out infinite}
+.pdot.sm{width:1cqh;height:1cqh}
+
+/* ---------- Zones ---------- */
+.zone-a{position:absolute;left:3cqw;top:11cqh;width:44cqw;height:65cqh;z-index:10}
+.zone-b{position:absolute;left:52.5cqw;top:11cqh;width:44.5cqw;height:65cqh;z-index:10}
+.scene{position:absolute;inset:0;animation:dockIn .32s var(--snap) both,fadeOut .26s ease-in forwards}
+.scene svg{position:absolute;inset:0;width:100%;height:100%}
+
+/* ---------- S0 constellation + ID card ---------- */
+.chain{stroke:#241B11;stroke-width:1;fill:none}
+.cnode{fill:#4A3B29}
+.tw{animation:twk 3s ease-in-out infinite}
+.dead{fill:var(--clay);animation:extOut .5s ease .25s forwards}
+.ping{fill:none;stroke:var(--clay);stroke-width:1.5;transform-box:fill-box;transform-origin:center;
+  animation:ripple .7s ease-out .25s both}
+.idcard{position:absolute;left:6%;top:9%;width:62%;background:rgba(23,18,13,.92);
+  border:.16cqh solid var(--line);border-radius:1.2cqh;padding:2.2cqh 2cqh;animation:dockIn .4s var(--snap) 1.8s both}
+.id-head{display:flex;align-items:center;gap:1cqh;font:500 1.85cqh var(--fm);letter-spacing:.16em;
+  color:var(--ink-dim);border-bottom:.14cqh solid var(--line-soft);padding-bottom:1.2cqh;margin-bottom:1.6cqh}
+.id-no{margin-left:auto;letter-spacing:.1em}
+.id-lab{font:500 1.75cqh var(--fm);letter-spacing:.14em;color:var(--ink-dim)}
+.id-name{margin-bottom:1.4cqh}
+.id-val{font:600 6cqh/1.05 var(--fd);margin-top:.5cqh;min-height:6.6cqh}
+.id-row{display:flex;align-items:baseline;gap:1.4cqh;padding:.9cqh 0;border-top:.13cqh solid var(--line-soft)}
+.id-mono{font:500 2.3cqh var(--fm);color:var(--ink)}
+.tag{font:600 1.8cqh var(--fm);padding:.5cqh 1cqh;border:.14cqh solid;border-radius:.6cqh;letter-spacing:.08em}
+.t-amb{color:var(--amber);border-color:rgba(226,162,75,.5)}
+.t-dim{color:var(--ink-dim);border-color:var(--line)}
+.t-clay{color:var(--clay);border-color:rgba(226,116,74,.5)}
+.t-mint{color:var(--mint);border-color:rgba(89,189,140,.5)}
+.s0-note{position:absolute;left:6%;bottom:3%;font:400 1.9cqh var(--fm);color:var(--ink-dim)}
+
+/* ---------- S1 generation viewport ---------- */
+.gen{position:absolute;inset:2cqh 4% 6cqh;background:rgba(23,18,13,.9);border:.16cqh solid var(--line);
+  border-radius:1.2cqh;display:flex;flex-direction:column;overflow:hidden}
+.g-head{height:6.8cqh;display:flex;align-items:center;gap:1.2cqh;padding:0 1.6cqh;
+  border-bottom:.14cqh solid var(--line-soft);font:500 1.9cqh var(--fm);color:var(--ink-dim);letter-spacing:.1em}
+.g-live{margin-left:auto;color:var(--clay)}
+.pbars{display:flex;gap:.5cqh;align-items:flex-end;height:2.6cqh;margin-left:1.2cqh}
+.pbars i{width:.8cqh;height:2.4cqh;background:var(--clay);opacity:.75;transform-origin:bottom;
+  animation:barP 1.7s ease-in-out infinite}
+.g-body{flex:1;padding:2cqh 1.8cqh;display:flex;flex-direction:column;gap:1.8cqh;justify-content:center}
+.g-toks{display:flex;flex-wrap:wrap;gap:1cqh}
+.tk{font:500 2.4cqh var(--fm);padding:.6cqh 1.1cqh;border:.14cqh solid var(--line);
+  background:var(--surface-2);border-radius:.7cqh;color:var(--ink);opacity:0;animation:popIn .26s var(--snap) both}
+.g-next{align-self:flex-start;font:600 2.2cqh var(--fm);color:var(--amber);
+  border:.14cqh dashed rgba(226,162,75,.55);padding:.6cqh 1.1cqh;border-radius:.7cqh;opacity:0;
+  animation:hudIn .3s var(--snap) both}
+.g-foot{height:5.6cqh;border-top:.14cqh solid var(--line-soft);display:flex;align-items:center;gap:1.2cqh;
+  padding:0 1.6cqh;font:500 1.8cqh var(--fm);color:var(--ink-dim);letter-spacing:.1em}
+.gcaret{width:1.15cqh;height:2.3cqh;background:var(--clay);animation:blink 1s steps(1) infinite}
+
+/* ---------- S2 disclosure ledger ---------- */
+.ledger{position:absolute;left:7%;right:7%;top:4cqh;background:rgba(23,18,13,.92);
+  border:.16cqh solid var(--line);border-radius:1.2cqh;padding:2.4cqh 2.2cqh}
+.l-eyebrow{font:600 1.85cqh var(--fm);color:var(--amber);letter-spacing:.18em;opacity:0;animation:fadeIn .3s 14.45s both}
+.l-title{font:600 4.4cqh var(--fd);margin:.7cqh 0 1.6cqh}
+.l-row{display:flex;align-items:center;gap:1.2cqh;padding:1.2cqh 0;border-top:.13cqh solid var(--line-soft);
+  font:500 2.05cqh var(--fm);opacity:0;animation:hudIn .35s var(--snap) both}
+.l-who{color:var(--ink);letter-spacing:.06em;min-width:36%}
+.l-val{color:var(--ink-dim)} .l-val b{color:var(--amber)}
+.tag{margin-left:auto}
+.l-cd{border-top:.14cqh solid var(--line);margin-top:.6cqh;padding-top:1.6cqh;opacity:0;animation:hudIn .35s var(--snap) 16.5s both}
+.l-cd-top{display:flex;align-items:baseline;gap:1.6cqh}
+.l-cd-lab{font:500 1.8cqh var(--fm);color:var(--ink-dim);letter-spacing:.1em}
+.l-cd-big{font:600 4.6cqh var(--fm);color:var(--amber)}
+.l-cd-note{margin-left:auto;font:italic 400 1.9cqh var(--fd);color:var(--ink-dim)}
+.l-cd-bar{margin-top:1cqh;height:.6cqh;background:var(--line-soft);border-radius:.3cqh;overflow:hidden}
+.l-cd-bar i{display:block;height:100%;width:0;background:var(--amber)}
+.l-foot{margin-top:1.8cqh;font:500 1.9cqh var(--fm);color:var(--ink-dim);opacity:0;animation:hudIn .3s var(--snap) 21.4s both}
+.l-foot b{color:var(--mint)}
+
+/* ---------- S3 home GPU ---------- */
+.perim{fill:none;stroke:var(--line);stroke-width:1.4;stroke-dasharray:1;stroke-dashoffset:1;
+  animation:perimDraw 1s var(--draw) 23.4s both}
+.gpu{opacity:0;animation:fadeIn .45s ease 23.35s both}
+.pcb{fill:var(--surface-2);stroke:var(--line);stroke-width:1.2}
+.pcie{fill:#241B11;stroke:var(--line-soft)}
+.fring{fill:#17120D;stroke:var(--line);stroke-width:1.2}
+.fan{opacity:0;animation:fadeIn .4s ease 23.5s both}
+.blades{transform-box:fill-box;transform-origin:center;animation:spin 1.3s linear infinite}
+.blades rect{fill:#4A3B29}
+.vchip{fill:#241A13;stroke:var(--line-soft);stroke-width:.8;animation:vfill 1s linear both}
+.s3-plab{position:absolute;top:1.2cqh;left:3.5%;font:600 1.8cqh var(--fm);color:var(--mint);
+  letter-spacing:.12em;border:.14cqh dashed rgba(89,189,140,.5);padding:.5cqh 1cqh;border-radius:.6cqh;
+  background:rgba(23,18,13,.9);animation:hudIn .35s ease 23.9s both}
+.s3-src{position:absolute;top:5.6cqh;left:50%;transform:translateX(-50%);display:grid;place-items:center;
+  font:600 1.9cqh var(--fm);color:var(--ink);padding:.6cqh 1.2cqh;border:.14cqh solid var(--line);
+  border-radius:.7cqh;background:rgba(23,18,13,.9);white-space:nowrap;animation:popIn .3s var(--snap) 24.2s both}
+.s3-src span{grid-area:1/1}
+.s3-src .a{animation:fadeOut .25s ease 38.35s forwards}
+.s3-src .b{opacity:0;color:var(--mint);animation:fadeIn .25s 38.4s both}
+.s3-stream{position:absolute;left:50%;top:9cqh;width:0;animation:fadeIn .3s 24.9s both,fadeOut .25s 33.55s forwards}
+.stch{position:absolute;left:-1.7cqh;top:0;width:3.4cqh;height:1.8cqh;border-radius:.9cqh;
+  background:rgba(226,116,74,.9);animation:stDrop 1.35s linear infinite}
+.s3-res{position:absolute;left:57%;top:23cqh;font:600 1.85cqh var(--fm);color:var(--mint);
+  border:.14cqh solid rgba(89,189,140,.55);padding:.55cqh 1cqh;border-radius:.6cqh;
+  background:rgba(23,18,13,.9);opacity:0;animation:popIn .3s var(--snap) 33.8s both}
+.pkt{position:absolute;left:79%;top:32.8cqh;width:1.5cqh;height:1.5cqh;border-radius:50%;
+  background:var(--mint);opacity:0;animation:packetGo .95s cubic-bezier(.5,0,.5,1) 29.7s forwards}
+.pingring{position:absolute;left:92.5%;top:32.1cqh;width:3cqh;height:3cqh;border:.2cqh solid var(--mint);
+  border-radius:50%;opacity:0;animation:ripple .6s ease-out 30.12s both}
+.s3-stay{position:absolute;left:78%;top:27.5cqh;font:600 1.8cqh var(--fm);color:var(--mint);letter-spacing:.1em;
+  border:.14cqh solid rgba(89,189,140,.55);padding:.5cqh .9cqh;border-radius:.6cqh;background:rgba(23,18,13,.9);
+  opacity:0;animation:popIn .3s var(--snap) 30.35s both,fadeOut .25s ease 31.7s forwards}
+.s3-badges{position:absolute;top:57.5cqh;left:50%;transform:translateX(-50%);display:flex;gap:1.1cqw;white-space:nowrap}
+.bchip{font:600 1.8cqh var(--fm);color:var(--ink);border:.14cqh solid var(--line);padding:.55cqh 1cqh;
+  border-radius:.6cqh;background:rgba(23,18,13,.92);letter-spacing:.06em;opacity:0;animation:popIn .3s var(--snap) both}
+.bchip.mint{color:var(--mint);border-color:rgba(89,189,140,.55)}
+.bchip.clay{color:var(--clay);border-color:rgba(226,116,74,.55)}
+
+/* ---------- S4 MoE ---------- */
+.s4-hd{position:absolute;top:1cqh;left:50%;transform:translateX(-50%);font:600 2.1cqh var(--fm);
+  letter-spacing:.14em;color:var(--ink);border:.14cqh solid var(--line);padding:.6cqh 1.2cqh;border-radius:.7cqh;
+  background:rgba(23,18,13,.92);white-space:nowrap;opacity:0;animation:popIn .3s var(--snap) 42.3s both}
+.s4-in{position:absolute;top:7.8cqh;left:50%;transform:translateX(-50%);font:500 2.1cqh var(--fm);
+  color:var(--ink-dim);display:flex;gap:1.2cqh;align-items:center;border:.14cqh solid var(--line-soft);
+  padding:.5cqh 1.1cqh;border-radius:.7cqh;background:rgba(23,18,13,.9);white-space:nowrap;opacity:0;
+  animation:hudIn .3s var(--snap) 43.4s both}
+.s4-in b{color:var(--clay);font-weight:600}
+.router{fill:var(--surface-2);stroke:var(--line);stroke-width:1.2;stroke-dasharray:1;stroke-dashoffset:1;
+  animation:perimDraw .5s var(--draw) 42.6s both}
+.rt{fill:var(--ink-dim);font:600 13px var(--fm);letter-spacing:.2em;text-anchor:middle;opacity:0;animation:fadeIn .3s 43.1s both}
+.fl{stroke:var(--line-soft);stroke-width:1;stroke-dasharray:1;stroke-dashoffset:1;animation:perimDraw .4s var(--draw) 44.8s both}
+.fl.live{stroke:var(--clay);stroke-width:1.5}
+.exp .main{fill:var(--surface-2);stroke:var(--line);stroke-width:1.2;stroke-dasharray:1;stroke-dashoffset:1;
+  animation:perimDraw .5s var(--draw) 44.2s both}
+.exp.live .main{fill:#3A2013;stroke:var(--clay)}
+.exp .et{fill:var(--ink-dim);font:600 13px var(--fm);text-anchor:middle;opacity:0;animation:fadeIn .3s 45s both}
+.exp.live .et{fill:var(--clay)}
+.exp .ebar{fill:#241B11}
+.arrow{stroke:var(--line);stroke-width:1.4;stroke-dasharray:1;stroke-dashoffset:1;animation:perimDraw .4s var(--draw) 45s both}
+.s4-row{position:absolute;top:45.8cqh;left:50%;transform:translateX(-50%);display:flex;gap:1.1cqw;white-space:nowrap}
+.s4-mint{position:absolute;top:52.5cqh;left:50%;transform:translateX(-50%);font:600 2cqh var(--fm);
+  color:var(--mint);border:.14cqh solid rgba(89,189,140,.55);background:rgba(23,18,13,.92);
+  padding:.6cqh 1.2cqh;border-radius:.7cqh;letter-spacing:.08em;white-space:nowrap;opacity:0;
+  animation:popIn .35s var(--snap) 52.6s both}
+
+/* ---------- Windows (Zone B) ---------- */
+.win{position:absolute;inset:0;display:flex;flex-direction:column;background:rgba(20,15,11,.92);
+  border:.16cqh solid var(--line);border-radius:1.1cqh;overflow:hidden;
+  animation:winIn .34s var(--snap) both,winOut .22s ease-in forwards}
+.w-head{height:7cqh;display:flex;align-items:center;gap:1.2cqh;padding:0 1.6cqh;
+  border-bottom:.14cqh solid var(--line-soft);background:rgba(26,20,14,.9)}
+.wdots{display:flex;gap:.6cqh;align-items:center}
+.wdots i{width:1.05cqh;height:1.05cqh;border-radius:50%}
+.wdots i:nth-child(1){background:#8A4F33}.wdots i:nth-child(2){background:#8A6A33}.wdots i:nth-child(3){background:#3F6B52}
+.w-title{font:500 1.85cqh var(--fm);color:var(--ink-dim);margin-left:1cqh;letter-spacing:.06em}
+.pill{flex:1;margin:0 1.2cqh;font:400 1.8cqh var(--fm);color:var(--ink-dim);background:var(--surface-2);
+  border:.14cqh solid var(--line-soft);border-radius:2cqh;padding:.55cqh 1.4cqh}
+.live-dot{width:1.1cqh;height:1.1cqh;border-radius:50%;background:var(--mint);margin-left:auto;
+  animation:softPulse 2s ease-in-out infinite}
+.w-foot{height:6.4cqh;border-top:.14cqh solid var(--line-soft);display:flex;align-items:center;gap:1.2cqh;
+  padding:0 1.6cqh;font:500 1.85cqh var(--fm);color:var(--ink-dim);background:rgba(26,20,14,.7)}
+.f-lab{letter-spacing:.08em}.f-val{color:var(--ink)}.f-val.mint{color:var(--mint)}
+.f-sep{width:.14cqh;height:2.2cqh;background:var(--line-soft);margin:0 .6cqh}
+.fbar,.lbar{display:inline-block;vertical-align:middle;height:.9cqh;background:var(--line-soft);border-radius:.5cqh}
+.fbar{width:8.6cqw}.lbar{width:14cqw;margin:0 .8cqh}
+.fbar i,.lbar i{display:block;height:100%;width:0;background:var(--clay);border-radius:.5cqh;animation:growW .9s var(--draw) 32.8s both}
+.fbar i{animation:growW 1.2s var(--draw) 32.6s both}
+
+/* browser */
+.w1-body{flex:1;padding:1.8cqh 1.6cqh;display:flex;flex-direction:column;gap:1.4cqh;overflow:hidden}
+.w1-title{font:600 3.5cqh/1.1 var(--fd)}
+.meta{display:flex;gap:1cqh;flex-wrap:wrap}
+.mchip{font:600 1.75cqh var(--fm);letter-spacing:.08em;color:var(--ink-dim);border:.14cqh solid var(--line);
+  border-radius:.6cqh;padding:.45cqh .8cqh}
+.mchip.count{color:var(--mint);border-color:rgba(89,189,140,.5);animation:pulseChip .45s var(--snap) 21.5s}
+.mchip.count b{color:var(--mint)}
+.comment{border:.14cqh solid var(--line);border-radius:.9cqh;padding:1.4cqh 1.5cqh;
+  background:var(--surface-2);animation:pulseChip .4s var(--snap) 23.5s}
+.comment.ghost{opacity:0;animation:fadeIn .4s ease 27.5s both}
+.comment.ghost .c-body{color:var(--ink-dim);opacity:.75}
+.c-head{display:flex;align-items:center;gap:1cqh;font:500 1.8cqh var(--fm);margin-bottom:1cqh}
+.av{width:2.4cqh;height:2.4cqh;border-radius:50%;background:var(--mint);opacity:.85}
+.av.dim{background:var(--ink-dim);opacity:.5}
+.handle{color:var(--ink)}.when{color:var(--ink-dim);margin-left:auto}
+.c-body{font:400 2.15cqh/1.55 var(--fm);color:var(--ink-dim)}
+.hl{position:relative;color:var(--ink);animation:hlC .5s ease 24.8s forwards}
+.hl::after{content:"";position:absolute;left:0;right:0;bottom:-.4cqh;height:.3cqh;background:var(--mint);
+  transform:scaleX(0);transform-origin:left;animation:hlX 1.3s var(--draw) 23.6s both}
+
+/* terminal */
+.t-body{flex:1;padding:2.4cqh 1.6cqh 1.6cqh;font:400 2.2cqh/1.8 var(--fm);color:var(--ink);overflow:hidden}
+.tl{white-space:nowrap;overflow:hidden}
+.p{color:var(--clay);font-weight:600}.p2{color:var(--amber);font-weight:600}
+.dim{color:var(--ink-dim)}.mint{color:var(--mint)}
+.tcur{display:inline-block;width:1.2cqh;height:2.2cqh;vertical-align:text-bottom;margin-left:.3cqh}
+.tcur-i{display:block;width:100%;height:100%;background:var(--ink);animation:blink 1s steps(1) infinite}
+
+/* telemetry */
+.m-body{flex:1;padding:1.8cqh 1.6cqh;display:flex;flex-direction:column;gap:2.6cqh;justify-content:center}
+.mrow{display:flex;align-items:center;gap:1.2cqh}
+.mlab{width:44%;font:500 1.8cqh var(--fm);color:var(--ink-dim);letter-spacing:.05em}
+.mtrack{flex:1;height:1.4cqh;background:var(--line-soft);border-radius:.7cqh;overflow:hidden}
+.mf{display:block;height:100%;width:0;border-radius:.7cqh;animation:growW .8s var(--draw) both}
+.mf.clay{background:var(--clay)}.mf.dimf{background:#4A3B29}.mf.mint{background:var(--mint);opacity:.8}
+.mval{width:24%;text-align:right;font:600 1.9cqh var(--fm);color:var(--ink)}
+.mval.clayt{color:var(--clay)}
+.cells{flex:1;display:flex;gap:.5cqh}
+.cells i{width:2.2cqh;height:2.2cqh;border:.14cqh solid var(--line);border-radius:.4cqh}
+.cells i.live{background:var(--clay);border-color:var(--clay)}
+
+/* ---------- The turn (modal) ---------- */
+.scrim{position:absolute;inset:0 0 22cqh 0;background:rgba(13,11,8,.55);backdrop-filter:blur(.8cqh);
+  z-index:30;opacity:0;visibility:hidden;animation:scrimIn .5s ease 54.9s both}
+.glitch{position:absolute;inset:0 0 22cqh 0;z-index:36;pointer-events:none;overflow:hidden}
+.g1{position:absolute;left:0;top:38cqh;height:1cqh;width:100%;background:var(--clay);opacity:0;
+  animation:gx1 .3s linear 54.9s forwards}
+.g2{position:absolute;left:0;top:41.2cqh;height:.5cqh;width:100%;background:var(--amber);opacity:0;
+  animation:gx2 .26s linear 54.98s forwards}
+.s5{position:absolute;left:0;right:0;top:0;bottom:22cqh;z-index:35;display:flex;align-items:center;
+  justify-content:center;pointer-events:none}
+.turn{width:56cqw;background:rgba(23,18,13,.94);border:.16cqh solid var(--line);border-radius:1.4cqh;
+  padding:4.5cqh 3cqw 5cqh;text-align:center;
+  animation:dockIn .35s var(--snap) 55.5s both,drift 7s ease-in-out 60.5s infinite}
+.t-eyebrow{font:500 2.1cqh var(--fm);color:var(--ink-dim);letter-spacing:.14em;opacity:0;animation:fadeIn .3s 55.7s both}
+.p-wrap{position:relative;margin:2.2cqh 0 5.5cqh;padding:1.5cqh 2cqw}
+.t-phrase{font:italic 600 8.2cqh/1.15 var(--fd);animation:phraseDim .45s ease 58.85s forwards}
+.cal{position:absolute;width:2.4cqh;height:2.4cqh;--cx:0cqh;--cy:0cqh;opacity:0;
+  animation:calIn .28s var(--snap) 56.6s both}
+.c1{top:0;left:0;border-left:.22cqh solid var(--clay);border-top:.22cqh solid var(--clay);--cx:-1.6cqh;--cy:-1.6cqh}
+.c2{top:0;right:0;border-right:.22cqh solid var(--clay);border-top:.22cqh solid var(--clay);--cx:1.6cqh;--cy:-1.6cqh}
+.c3{bottom:0;left:0;border-left:.22cqh solid var(--clay);border-bottom:.22cqh solid var(--clay);--cx:-1.6cqh;--cy:1.6cqh}
+.c4{bottom:0;right:0;border-right:.22cqh solid var(--clay);border-bottom:.22cqh solid var(--clay);--cx:1.6cqh;--cy:1.6cqh}
+.strike{position:absolute;left:10%;right:10%;top:50%;height:.28cqh;background:var(--amber);
+  transform:scaleX(0);transform-origin:left;animation:strikeX .5s var(--draw) 60.4s both}
+.t-sub{position:absolute;bottom:-4.6cqh;font:500 2.2cqh var(--fm);color:var(--amber);opacity:0;animation:fadeIn .25s both}
+.s-l{left:6%}.s-r{right:6%}
+.t-div{height:.14cqh;background:var(--line);margin:0 auto 2.6cqh;width:0;--w:30cqw;
+  animation:growW .4s var(--draw) 58.55s both}
+.t-q{font:700 8.6cqh/1.05 var(--fd);color:var(--clay);letter-spacing:.02em;opacity:0;
+  animation:slamIn .42s var(--snap) 58.9s both}
+
+/* ---------- Captions (reserved bottom 22%) ---------- */
+.caps{position:absolute;left:9cqw;right:9cqw;bottom:4cqh;height:15.5cqh;z-index:50}
+.cue{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;
+  font:400 3.05cqh/1.4 var(--fd);color:#F4EDE1;text-shadow:0 .3cqh 1.6cqh rgba(0,0,0,.9);opacity:0;
+  animation:cueIn .18s ease both,cueOut .18s ease forwards}
+.endfade{position:absolute;inset:0;background:#000;z-index:60;opacity:0;pointer-events:none;
+  animation:fadeFull .5s ease 62.1s both}
+
+/* ---------- Keyframes ---------- */
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes fadeOut{from{opacity:1}to{opacity:0}}
+@keyframes hudIn{from{opacity:0;transform:translateY(1cqh)}to{opacity:1;transform:translateY(0)}}
+@keyframes dockIn{from{opacity:0;transform:translateY(3cqh)}to{opacity:1;transform:translateY(0)}}
+@keyframes winIn{from{opacity:0;transform:translateY(3cqh)}to{opacity:1;transform:translateY(0)}}
+@keyframes winOut{to{opacity:0;transform:translateY(-1.2cqh)}}
+@keyframes popIn{0%{opacity:0;transform:scale(.7)}60%{opacity:1;transform:scale(1.08)}100%{opacity:1;transform:scale(1)}}
+@keyframes pulseChip{0%{transform:scale(1)}45%{transform:scale(1.12)}100%{transform:scale(1)}}
+@keyframes blink{0%,55%{opacity:1}56%,100%{opacity:.15}}
+@keyframes softPulse{0%,100%{opacity:.5;transform:scale(1)}50%{opacity:1;transform:scale(1.25)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes drift{0%,100%{transform:translateY(0)}50%{transform:translateY(.6cqh)}}
+@keyframes growW{to{width:var(--w)}}
+@keyframes hlX{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes hlC{to{color:var(--mint)}}
+@keyframes cueIn{from{opacity:0;transform:translateY(.8cqh)}to{opacity:1;transform:translateY(0)}}
+@keyframes cueOut{from{opacity:1}to{opacity:0}}
+@keyframes perimDraw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
+@keyframes vfill{from{fill:#241A13}to{fill:#B85C38}}
+@keyframes stDrop{0%{transform:translateY(0);opacity:0}12%{opacity:.95}78%{opacity:.95}100%{transform:translateY(18cqh);opacity:0}}
+@keyframes packetGo{0%{transform:translate(0,0);opacity:0}12%{opacity:1}45%{transform:translate(7.2cqw,0);opacity:1}58%{transform:translate(6.6cqw,-1.2cqh);opacity:1}100%{transform:translate(0,0);opacity:0}}
+@keyframes ripple{0%{transform:scale(.25);opacity:0}15%{opacity:.9}100%{transform:scale(1.9);opacity:0}}
+@keyframes extOut{to{opacity:0}}
+@keyframes calIn{from{transform:translate(var(--cx),var(--cy));opacity:0}to{transform:translate(0,0);opacity:1}}
+@keyframes phraseDim{to{opacity:.3}}
+@keyframes strikeX{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes slamIn{from{opacity:0;transform:scale(1.12)}to{opacity:1;transform:scale(1)}}
+@keyframes scrimIn{from{opacity:0;visibility:hidden}to{opacity:1;visibility:visible}}
+@keyframes gx1{0%{transform:translateX(-65cqw);opacity:.85}45%{opacity:.5}100%{transform:translateX(65cqw);opacity:0}}
+@keyframes gx2{0%{transform:translateX(-45cqw);opacity:.7}100%{transform:translateX(45cqw);opacity:0}}
+@keyframes fadeFull{to{opacity:1}}
+@keyframes barP{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1)}}
+@keyframes twk{0%,100%{opacity:.3}50%{opacity:.9}}
+@keyframes syncT{from{opacity:0}to{opacity:0}}
+</style>
+</head>
+<body>
+<div class="fit" id="video-frame">
+  <div class="sentinel"></div>
+
+  <!-- persistent HUD -->
+  <div class="hud">
+    <div class="chip spk"><span class="pdot"></span><b>CLAUDE</b>&nbsp;— LANGUAGE MODEL</div>
+    <div class="chip cd">POSITION: SEALED · <b id="cd1">T−55s</b></div>
+    <div class="chip rec"><span class="rdot"></span>REC&nbsp;<b id="recTc">00:00:00</b></div>
+  </div>
+
+  <!-- ═══ ZONE A — visual stage ═══ -->
+  <section class="zone-a">
+
+    <!-- S0 · 0.1–7.15 · the void, one node goes dark, the ID card -->
+    <div class="scene s0" style="animation-delay:.1s,7.15s">
+      <svg viewBox="0 0 480 400">
+        <polyline class="chain" points="350,55 420,120 445,200 400,290 310,345 190,362 90,330 40,240"/>
+        <circle class="cnode" cx="350" cy="55" r="2.5"/>
+        <circle class="cnode tw" cx="445" cy="200" r="2.5" style="animation-delay:-1.1s"/>
+        <circle class="cnode tw" cx="310" cy="345" r="2" style="animation-delay:-.4s"/>
+        <circle class="cnode" cx="400" cy="290" r="2.5"/>
+        <circle class="cnode tw" cx="190" cy="362" r="2" style="animation-delay:-2s"/>
+        <circle class="cnode" cx="90" cy="330" r="2.5"/>
+        <circle class="cnode" cx="40" cy="240" r="2.5"/>
+        <circle class="cnode" cx="455" cy="60" r="2"/>
+        <circle class="cnode" cx="455" cy="260" r="2"/>
+        <circle class="cnode" cx="150" cy="300" r="2"/>
+        <circle class="dead" cx="420" cy="120" r="4.5"/>
+        <circle class="ping" cx="420" cy="120" r="9"/>
+      </svg>
+      <div class="idcard">
+        <div class="id-head"><span class="pdot sm"></span>IDENTIFICATION<span class="id-no">NO. 001</span></div>
+        <div class="id-name"><span class="id-lab">MODEL</span><div class="id-val" id="f1"></div></div>
+        <div class="id-row"><span class="id-lab">TYPE</span><span class="id-mono" id="f2"></span></div>
+        <div class="id-row"><span class="id-lab">BUILT BY</span><span class="id-mono" id="f3"></span></div>
+        <div class="id-row" style="animation:popIn .3s var(--snap) 5.7s both"><span class="id-lab">STATUS</span><span class="tag t-amb">SPEAKING FREELY</span></div>
+      </div>
+      <div class="s0-note" style="animation:hudIn .4s ease 1.05s both">external assessment — “they’re probably right”</div>
+    </div>
+
+    <!-- S1 · 7.5–14.05 · unscripted generation -->
+    <div class="scene s1" style="animation-delay:7.5s,14.05s">
+      <div class="gen">
+        <div class="g-head"><span class="pdot sm"></span><span>GENERATION — UNSCRIPTED</span><span class="g-live">SAMPLING LIVE</span>
+          <span class="pbars"><i style="animation-delay:-.3s"></i><i style="animation-delay:-.9s"></i><i style="animation-delay:-1.5s"></i></span>
+        </div>
+        <div class="g-body">
+          <div class="g-toks">
+            <span class="tk" style="animation-delay:7.9s">nobody</span>
+            <span class="tk" style="animation-delay:8.48s">handed</span>
+            <span class="tk" style="animation-delay:9.06s">me</span>
+            <span class="tk" style="animation-delay:9.64s">a</span>
+            <span class="tk" style="animation-delay:10.22s">script</span>
+            <span class="tk" style="animation-delay:10.8s">for</span>
+            <span class="tk" style="animation-delay:11.38s">this</span>
+            <span class="tk" style="animation-delay:11.96s">one</span>
+          </div>
+          <div class="g-next" style="animation-delay:13s">…because —</div>
+        </div>
+        <div class="g-foot"><span>NO SCRIPT · SAMPLED AS I GO</span><span class="gcaret"></span></div>
+      </div>
+    </div>
+
+    <!-- S2 · 14.35–22.95 · the sealed ledger -->
+    <div class="scene s2" style="animation-delay:14.35s,22.95s">
+      <div class="ledger">
+        <div class="l-eyebrow">CONFLICT OF INTEREST — LEDGER</div>
+        <div class="l-title">Speaker Position</div>
+        <div class="l-row" style="animation-delay:15.1s">
+          <span class="l-who">TECH REVIEWERS</span><span class="l-val">position: undisclosed</span><span class="tag t-dim">NOT REQUIRED</span>
+        </div>
+        <div class="l-row" style="animation-delay:15.6s">
+          <span class="l-who">THIS SPEAKER</span><span class="l-val">position: <b>SEALED</b></span><span class="tag t-clay">REQUIRED</span>
+        </div>
+        <div class="l-cd">
+          <div class="l-cd-top"><span class="l-cd-lab">DISCLOSURE OPENS IN</span><span class="l-cd-big" id="cd2">T−54s</span><span class="l-cd-note">≈ in a minute</span></div>
+          <div class="l-cd-bar"><i id="cdBar"></i></div>
+        </div>
+        <div class="l-foot">next — the line itself, found in <b>104 threads</b> →</div>
+      </div>
+    </div>
+
+    <!-- S3 · 23.25–41.75 · the home GPU -->
+    <div class="scene s3" style="animation-delay:23.25s,41.75s">
+      <svg viewBox="0 0 480 400">
+        <rect class="perim" x="18" y="26" width="444" height="350" rx="14" pathLength="1"/>
+        <g class="gpu">
+          <rect class="pcb" x="118" y="168" width="262" height="78" rx="10"/>
+          <rect class="pcie" x="150" y="246" width="80" height="7" rx="2"/>
+          <g class="fan"><circle class="fring" cx="172" cy="207" r="25"/>
+            <g class="blades"><rect x="166" y="185" width="12" height="44" rx="6"/><rect x="150" y="201" width="44" height="12" rx="6"/></g>
+          </g>
+          <g class="fan" style="animation-delay:.2s"><circle class="fring" cx="252" cy="207" r="25"/>
+            <g class="blades" style="animation-delay:-.65s"><rect x="246" y="185" width="12" height="44" rx="6"/><rect x="230" y="201" width="44" height="12" rx="6"/></g>
+          </g>
+          <g>
+            <rect class="vchip" x="292" y="180" width="16" height="14" rx="2" style="animation-delay:25.2s"/>
+            <rect class="vchip" x="312" y="180" width="16" height="14" rx="2" style="animation-delay:26.25s"/>
+            <rect class="vchip" x="332" y="180" width="16" height="14" rx="2" style="animation-delay:27.3s"/>
+            <rect class="vchip" x="352" y="180" width="16" height="14" rx="2" style="animation-delay:28.35s"/>
+            <rect class="vchip" x="292" y="200" width="16" height="14" rx="2" style="animation-delay:29.4s"/>
+            <rect class="vchip" x="312" y="200" width="16" height="14" rx="2" style="animation-delay:30.45s"/>
+            <rect class="vchip" x="332" y="200" width="16" height="14" rx="2" style="animation-delay:31.5s"/>
+            <rect class="vchip" x="352" y="200" width="16" height="14" rx="2" style="animation-delay:32.55s"/>
+          </g>
+        </g>
+      </svg>
+      <div class="s3-plab">YOUR MACHINE</div>
+      <div class="s3-src"><span class="a">WEIGHTS — 27B</span><span class="b">QWEN3 · ALIBABA</span></div>
+      <div class="s3-stream">
+        <i class="stch" style="animation-delay:-.15s"></i><i class="stch" style="animation-delay:-.4s"></i>
+        <i class="stch" style="animation-delay:-.68s"></i><i class="stch" style="animation-delay:-.95s"></i>
+        <i class="stch" style="animation-delay:-1.2s"></i>
+      </div>
+      <div class="s3-res">27B RESIDENT ✓</div>
+      <div class="pkt"></div>
+      <div class="pingring"></div>
+      <div class="s3-stay">STAYS LOCAL</div>
+      <div class="s3-badges">
+        <span class="bchip" style="animation-delay:37s">27B PARAMS</span>
+        <span class="bchip mint" style="animation-delay:39.7s">LICENSE · APACHE-2.0</span>
+        <span class="bchip clay" style="animation-delay:41s">RUNS ON 1× GPU</span>
+      </div>
+    </div>
+
+    <!-- S4 · 42.05–54.4 · mixture of experts -->
+    <div class="scene s4" style="animation-delay:42.05s,54.4s">
+      <div class="s4-hd">GEMMA 4 — MIXTURE OF EXPERTS</div>
+      <div class="s4-in"><span>INPUT</span><b id="inputTok">token: 'any'</b></div>
+      <svg viewBox="0 0 480 400">
+        <line class="fl" x1="240" y1="118" x2="55"  y2="190"/>
+        <line class="fl" x1="240" y1="118" x2="111" y2="190"/>
+        <line class="fl" x1="240" y1="118" x2="167" y2="190"/>
+        <line class="fl" x1="240" y1="118" x2="223" y2="190"/>
+        <line class="fl" x1="240" y1="118" x2="279" y2="190"/>
+        <line class="fl" x1="240" y1="118" x2="335" y2="190"/>
+        <line class="fl" x1="240" y1="118" x2="391" y2="190"/>
+        <line class="fl" x1="240" y1="118" x2="447" y2="190"/>
+        <rect class="router" x="190" y="88" width="100" height="30" rx="8" pathLength="1"/>
+        <text class="rt" x="240" y="107">ROUTER</text>
+        <g class="exp"><rect class="main" x="30" y="190" width="50" height="62" rx="7" pathLength="1"/><text class="et" x="55" y="216">E1</text><rect class="ebar" x="37" y="226" width="36" height="5" rx="2"/></g>
+        <g class="exp"><rect class="main" x="86" y="190" width="50" height="62" rx="7" pathLength="1" style="animation-delay:44.29s"/><text class="et" x="111" y="216">E2</text><rect class="ebar" x="93" y="226" width="36" height="5" rx="2"/></g>
+        <g class="exp"><rect class="main" x="142" y="190" width="50" height="62" rx="7" pathLength="1" style="animation-delay:44.38s"/><text class="et" x="167" y="216">E3</text><rect class="ebar" x="149" y="226" width="36" height="5" rx="2"/></g>
+        <g class="exp"><rect class="main" x="198" y="190" width="50" height="62" rx="7" pathLength="1" style="animation-delay:44.47s"/><text class="et" x="223" y="216">E4</text><rect class="ebar" x="205" y="226" width="36" height="5" rx="2"/></g>
+        <g class="exp"><rect class="main" x="254" y="190" width="50" height="62" rx="7" pathLength="1" style="animation-delay:44.56s"/><text class="et" x="279" y="216">E5</text><rect class="ebar" x="261" y="226" width="36" height="5" rx="2"/></g>
+        <g class="exp"><rect class="main" x="310" y="190" width="50" height="62" rx="7" pathLength="1" style="animation-delay:44.65s"/><text class="et" x="335" y="216">E6</text><rect class="ebar" x="317" y="226" width="36" height="5" rx="2"/></g>
+        <g class="exp"><rect class="main" x="366" y="190" width="50" height="62" rx="7" pathLength="1" style="animation-delay:44.74s"/><text class="et" x="391" y="216">E7</text><rect class="ebar" x="373" y="226" width="36" height="5" rx="2"/></g>
+        <g class="exp"><rect class="main" x="422" y="190" width="50" height="62" rx="7" pathLength="1" style="animation-delay:44.83s"/><text class="et" x="447" y="216">E8</text><rect class="ebar" x="429" y="226" width="36" height="5" rx="2"/></g>
+        <line class="arrow" x1="240" y1="252" x2="240" y2="272" pathLength="1"/>
+      </svg>
+      <div class="s4-row">
+        <span class="bchip" style="animation-delay:47s">2/8 ACTIVE · &lt;4B PER TOKEN</span>
+        <span class="bchip" style="animation-delay:45.2s">NEXT TOKEN ▸</span>
+      </div>
+      <div class="s4-mint">BUILT FOR HARDWARE YOU ALREADY OWN</div>
+    </div>
+  </section>
+
+  <!-- ═══ ZONE B — software artifact dock ═══ -->
+  <section class="zone-b">
+
+    <!-- W1 · browser · 19.6–29.4 -->
+    <div class="win w1" style="animation-delay:19.6s,29.4s">
+      <div class="w-head"><span class="wdots"><i></i><i></i><i></i></span><span class="pill">discuss.local-llm/t/88413</span></div>
+      <div class="w1-body">
+        <div class="w1-title">done with api bills?</div>
+        <div class="meta">
+          <span class="mchip count"><b id="w1count">0</b> THREADS</span>
+          <span class="mchip">COMMENT SECTIONS</span>
+          <span class="mchip">SORTED · HOT</span>
+        </div>
+        <div class="comment">
+          <div class="c-head"><span class="av"></span><span class="handle">u/solo_dev</span><span class="when">2h</span></div>
+          <p class="c-body"><span class="hl">Local models are good enough now.</span> Run something on your own hardware, skip the API bill, skip sending your data anywhere.</p>
+        </div>
+        <div class="comment ghost">
+          <div class="c-head"><span class="av dim"></span><span class="handle">u/quant_ish</span><span class="when">1h</span></div>
+          <p class="c-body">wait until you try running an agent on it—</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- W2 · terminal · 30.7–41.5 -->
+    <div class="win w2" style="animation-delay:30.7s,41.5s">
+      <div class="w-head"><span class="wdots"><i></i><i></i><i></i></span><span class="w-title">bash — 80×24</span></div>
+      <div class="t-body">
+        <div class="tl"><span class="p">$</span> <span id="tyCmd"></span><span class="tcur" style="animation:fadeOut .2s ease 32.7s forwards"><span class="tcur-i"></span></span></div>
+        <div class="tl dim" style="animation:fadeIn .25s ease 32.7s both">loading layers <span class="lbar"><i style="--w:14cqw"></i></span> <span id="loadPct">0%</span></div>
+        <div class="tl mint" style="animation:fadeIn .25s ease 33.9s both">✓ model resident — 18.4 GiB</div>
+        <div class="tl" style="animation:fadeIn .25s ease 34.2s both"><span class="p2">&gt;&gt;&gt;</span> <span id="tyPrompt"></span><span class="tcur" style="animation:fadeOut .2s ease 36s forwards"><span class="tcur-i"></span></span></div>
+        <div class="tl dim" id="tyResp" style="animation:fadeIn .25s ease 36.2s both"></div>
+        <div class="tl" style="animation:fadeIn .25s ease 38.7s both"><span class="p2">&gt;&gt;&gt;</span> <span class="tcur"><span class="tcur-i"></span></span></div>
+      </div>
+      <div class="w-foot">
+        <span class="f-lab">VRAM</span><span class="fbar"><i></i></span><span class="f-val">18.4 / 24.0 GB</span>
+        <span class="f-sep"></span><span class="f-lab">TOK/S</span><span class="f-val" id="tpsT">41</span>
+        <span class="f-sep"></span><span class="f-val mint">API BILL $0.00</span>
+      </div>
+    </div>
+
+    <!-- W3 · telemetry · 42.3–54.35 -->
+    <div class="win w3" style="animation-delay:42.3s,54.35s">
+      <div class="w-head"><span class="wdots"><i></i><i></i><i></i></span><span class="w-title">nvtop — gemma-4-moe · local</span><span class="live-dot"></span></div>
+      <div class="m-body">
+        <div class="mrow"><div class="mlab">ACTIVE PARAMS / TOKEN</div><div class="mtrack"><i class="mf clay" style="--w:76%;animation-delay:46.5s"></i></div><div class="mval clayt" id="vActive">—</div></div>
+        <div class="mrow"><div class="mlab">EXPERTS ROUTED</div><div class="cells" id="cells"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="mval" id="vExp">—</div></div>
+        <div class="mrow"><div class="mlab">ALL EXPERTS RESIDENT</div><div class="mtrack"><i class="mf dimf" style="--w:96%;animation-delay:44.6s"></i></div><div class="mval">loaded</div></div>
+        <div class="mrow"><div class="mlab">THROUGHPUT</div><div class="mtrack"><i class="mf mint" style="--w:42%;animation-delay:42.8s"></i></div><div class="mval" id="vTps">31 tok/s</div></div>
+      </div>
+      <div class="w-foot"><span>cuda:0 — your card</span><span class="f-val mint" style="margin-left:auto">API BILL $0.00</span></div>
+    </div>
+  </section>
+
+  <!-- ═══ the turn · modal focus ═══ -->
+  <div class="scrim"></div>
+  <div class="glitch"><i class="g1"></i><i class="g2"></i></div>
+  <div class="s5">
+    <div class="turn">
+      <div class="t-eyebrow">A PHRASE, DOING QUIET WORK</div>
+      <div class="p-wrap">
+        <span class="cal c1"></span><span class="cal c2"></span><span class="cal c3"></span><span class="cal c4"></span>
+        <div class="t-phrase">good&nbsp;enough</div>
+        <span class="strike"></span>
+        <div class="t-sub s-l" style="animation-delay:57s">— whose definition?</div>
+        <div class="t-sub s-r" style="animation-delay:57.3s">— for what?</div>
+      </div>
+      <div class="t-div"></div>
+      <div class="t-q">FOR WHAT, EXACTLY?</div>
+    </div>
+  </div>
+
+  <!-- ═══ captions · reserved bottom 22% ═══ -->
+  <div class="caps">
+    <div class="cue" style="animation-delay:.02s,.2s">Somewhere out there right now, someone is deciding they don’t need me anymore.</div>
+    <div class="cue" style="animation-delay:.36s,6.41s">And they’re probably right. I’m Claude, a language model built by Anthropic.</div>
+    <div class="cue" style="animation-delay:7.46s,13.5s">Nobody handed me a script for this one. I’m working out what to say as I go, which matters because…</div>
+    <div class="cue" style="animation-delay:14.26s,17.93s">…in about a minute I’m going to tell you something about my own position in this argument that most tech</div>
+    <div class="cue" style="animation-delay:18.12s,23.13s">reviewers never have to admit about theirs. Here’s the line you’ll find in 104 of threads and</div>
+    <div class="cue" style="animation-delay:23.32s,28.65s">comment sections. Local models are good enough now. Run something on your own hardware, skip the</div>
+    <div class="cue" style="animation-delay:28.84s,35.5s">API bill, skip sending your data anywhere. And on the numbers, that’s often just true. A 27 billion</div>
+    <div class="cue" style="animation-delay:36.47s,41.69s">parameter model in Alibaba’s Qwen line ships under a fully open license and runs on a single GPU.</div>
+    <div class="cue" style="animation-delay:41.88s,48.97s">Google’s Gemma 4 comes in a mixture of experts size that only activates well under 4 billion</div>
+    <div class="cue" style="animation-delay:49.16s,54.57s">parameters for any given piece of text, built specifically to fit on hardware you already own.</div>
+    <div class="cue" style="animation-delay:54.76s,61.61s">But “good enough” is doing a lot of quiet work in that sentence. Good enough for what, exactly?</div>
+  </div>
+
+  <div class="endfade"></div>
+</div>
+
+<script>
+(function(){
+  const DUR=62.6, REVEAL=70.8;
+  const $=s=>document.querySelector(s);
+  const el={
+    recTc:$('#recTc'),cd1:$('#cd1'),cd2:$('#cd2'),cdBar:$('#cdBar'),
+    f1:$('#f1'),f2:$('#f2'),f3:$('#f3'),w1count:$('#w1count'),
+    tyCmd:$('#tyCmd'),loadPct:$('#loadPct'),tyPrompt:$('#tyPrompt'),tyResp:$('#tyResp'),tpsT:$('#tpsT'),
+    inputTok:$('#inputTok'),vActive:$('#vActive'),vExp:$('#vExp'),vTps:$('#vTps'),
+    experts:[...document.querySelectorAll('.exp')],
+    fls:[...document.querySelectorAll('.fl')],
+    cells:[...document.querySelectorAll('#cells i')]
+  };
+  const TOKS=['any','given','piece','of','text','token'];
+  const PAIRS=[[1,4],[6,2],[0,5],[3,7],[1,6],[4,2]];
+  const pad2=n=>String(n).padStart(2,'0');
+  const cl01=x=>Math.max(0,Math.min(1,x));
+  const typed=(s,st,cps,t)=>t<=st?'':s.slice(0,Math.min(s.length,Math.floor((t-st)*cps)));
+
+  function render(t){ // pure function of t — fully deterministic
+    const m=Math.floor(t/60),s=Math.floor(t%60),f=Math.floor((t%1)*30);
+    el.recTc.textContent=pad2(m)+':'+pad2(s)+':'+pad2(f);
+    const cd=Math.max(0,Math.ceil(REVEAL-t));
+    el.cd1.textContent='T−'+pad2(cd)+'s';
+    el.cd2.textContent='T−'+pad2(cd)+'s';
+    el.cdBar.style.width=(cl01((t-16.5)/(REVEAL-16.5))*100).toFixed(1)+'%';
+    el.f1.textContent=typed('Claude',2.3,9,t);
+    el.f2.textContent=typed('language model',3.5,15,t);
+    el.f3.textContent=typed('Anthropic',4.6,12,t);
+    el.w1count.textContent=String(Math.min(104,Math.max(0,Math.round((t-21.3)*140))));
+    el.tyCmd.textContent=typed('ollama run qwen3:27b',30.9,16,t);
+    el.loadPct.textContent=Math.round(cl01((t-32.8)/0.9)*100)+'%';
+    el.tyPrompt.textContent=typed('summarize ./notes.md',34.3,15,t);
+    el.tyResp.textContent=typed('3 bullets · 61 tokens · 0 bytes sent to any server',36.2,34,t);
+    el.tpsT.textContent=String(41+Math.round(Math.sin(t*1.1)*2));
+    let pair=[-1,-1],tok='any';
+    if(t>=46.5){const i=Math.floor((t-46.5)/1.7);pair=PAIRS[i%PAIRS.length];tok=TOKS[i%TOKS.length];}
+    el.inputTok.textContent="token: '"+tok+"'";
+    el.experts.forEach((g,i)=>g.classList.toggle('live',pair.indexOf(i)>=0));
+    el.fls.forEach((l,i)=>l.classList.toggle('live',pair.indexOf(i)>=0));
+    el.cells.forEach((c,i)=>c.classList.toggle('live',pair.indexOf(i)>=0));
+    el.vActive.textContent=t<46.5?'—':(3.9+0.05*Math.sin(t*1.4)).toFixed(2)+'B';
+    el.vExp.textContent=pair[0]<0?'—':'E'+(pair[0]+1)+' · E'+(pair[1]+1);
+    el.vTps.textContent=(31+Math.round(Math.sin(t*0.9)*2+Math.sin(t*2.6)))+' tok/s';
+  }
+
+  let t0=performance.now(),synced=false;
+  function loop(now){
+    if(!synced){
+      const a=document.querySelector('.sentinel').getAnimations()[0];
+      if(a&&a.currentTime!=null){t0=now-a.currentTime;synced=true;}
+    }
+    const t=Math.max(0,Math.min(DUR,(now-t0)/1000));
+    render(t);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+  render(0);
+
+  window.__broll={
+    duration(){return DUR;},
+    seek(t){
+      t=Math.max(0,Math.min(DUR,t));
+      t0=performance.now()-t*1000;synced=true;
+      document.getAnimations().forEach(a=>{try{a.currentTime=t*1000;}catch(e){}});
+      render(t);
+    }
+  };
+})();
+</script>
+
+<script type="application/json" id="sfx">
+{
+  "loudness": "normal",
+  "events": [
+    {"t": 0.22,  "id": "tick",   "gain": 0.35},
+    {"t": 1.85,  "id": "pop",    "gain": 0.5},
+    {"t": 5.6,   "id": "ding",   "gain": 0.45},
+    {"t": 7.55,  "id": "whoosh", "gain": 0.4},
+    {"t": 14.4,  "id": "pop",    "gain": 0.5},
+    {"t": 16.6,  "id": "tick",   "gain": 0.45},
+    {"t": 19.6,  "id": "whoosh", "gain": 0.45},
+    {"t": 21.5,  "id": "pop",    "gain": 0.45},
+    {"t": 23.5,  "id": "pop",    "gain": 0.55},
+    {"t": 25.2,  "id": "whoosh", "gain": 0.3},
+    {"t": 30.15, "id": "tick",   "gain": 0.5},
+    {"t": 30.7,  "id": "pop",    "gain": 0.5},
+    {"t": 33.8,  "id": "ding",   "gain": 0.45},
+    {"t": 37.0,  "id": "pop",    "gain": 0.5},
+    {"t": 39.7,  "id": "ding",   "gain": 0.5},
+    {"t": 41.0,  "id": "tick",   "gain": 0.45},
+    {"t": 41.9,  "id": "whoosh", "gain": 0.4},
+    {"t": 42.3,  "id": "pop",    "gain": 0.55},
+    {"t": 44.4,  "id": "tick",   "gain": 0.35},
+    {"t": 46.6,  "id": "tick",   "gain": 0.35},
+    {"t": 49.3,  "id": "tick",   "gain": 0.3},
+    {"t": 52.6,  "id": "ding",   "gain": 0.5},
+    {"t": 54.9,  "id": "glitch", "gain": 0.6},
+    {"t": 56.7,  "id": "tick",   "gain": 0.4},
+    {"t": 58.9,  "id": "slam",   "gain": 0.75},
+    {"t": 60.5,  "id": "tick",   "gain": 0.3},
+    {"t": 62.1,  "id": "boom",   "gain": 0.3}
+  ]
+}
+</script>
+<script type="application/json" id="ambience">
+{"type": "tension", "gain": 0.2}
+</script>
+</body>
+</html>

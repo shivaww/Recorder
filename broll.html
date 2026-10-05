@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>BLOCK 00:00–01:00 — rich bright cut</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/anton/index.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/ibm-plex-mono/400.css">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;background:#050607}
+:root{
+  --void:#0a0d10; --surface:#1a2126; --line:#37424a; --ink:#f4f1e7;
+  --muted:#98a1a8; --acc:#ff4a2a; --acc2:#ffb830; --hero:#3de8c0; --ok:#5af57e;
+  --flash:#fdfaf1;
+  --slam:cubic-bezier(.2,1.35,.35,1); --draw:cubic-bezier(.45,.05,.4,1);
+  --risek:cubic-bezier(.16,.9,.26,1); --drift:ease-in-out;
+  --disp:'Anton',sans-serif; --mono:'IBM Plex Mono',monospace;
+}
+.fit{aspect-ratio:16/9;container-type:size;overflow:hidden;
+  width:100vw;max-width:calc(100vh*16/9);margin:0 auto;
+  position:relative;background:var(--void)}
+.safe{position:absolute;inset:0 0 25% 0}
+body.cdp .guides, body.cdp .vtag{display:none}
+
+/* ambient floor — glow pools + whisper grid */
+.floor{position:absolute;inset:-12%;z-index:0;
+  background:
+    radial-gradient(90cqh at 78% 30%, color-mix(in srgb,var(--acc2) 8%,transparent), transparent 60%),
+    radial-gradient(80cqh at 18% 70%, color-mix(in srgb,var(--hero) 7%,transparent), transparent 60%),
+    linear-gradient(color-mix(in srgb,var(--ink) 4%,transparent) .16cqh, transparent .16cqh),
+    linear-gradient(90deg, color-mix(in srgb,var(--ink) 4%,transparent) .16cqh, transparent .16cqh);
+  background-size:100% 100%,100% 100%,14.2cqh 14.2cqh,14.2cqh 14.2cqh;
+  animation:floorDrift 60s linear 0s both}
+@keyframes floorDrift{from{transform:translate3d(0,0,0)}to{transform:translate3d(-6cqh,-3cqh,0)}}
+.mote{position:absolute;width:.5cqh;height:.5cqh;border-radius:50%;
+  background:color-mix(in srgb,var(--ink) 50%,transparent);opacity:0;
+  animation:moteK 60s linear var(--d) both}
+@keyframes moteK{0%{transform:translate(0,0);opacity:0}6%{opacity:.5}
+  94%{opacity:.5}100%{transform:translate(var(--mx),var(--my));opacity:0}}
+.vig{position:absolute;inset:0;z-index:4;pointer-events:none;
+  background:radial-gradient(120% 120% at 50% 42%, transparent 55%, color-mix(in srgb,var(--void) 68%,transparent) 100%)}
+#fx{position:absolute;inset:0;width:100%;height:100%;z-index:6;pointer-events:none}
+
+.stage{position:absolute;inset:0;z-index:1;animation:cam 60s var(--drift) 0s both}
+@keyframes cam{0%{transform:scale(1)}88%{transform:scale(1.06)}100%{transform:scale(1)}}
+.shot{position:absolute;inset:0;z-index:1;animation:shotOut .5s var(--drift) var(--out) both}
+.sin{position:absolute;inset:0;padding:4cqh 5cqw 7cqh;opacity:0;
+  animation:shotIn .6s var(--risek) var(--in) both}
+@keyframes shotIn{from{opacity:0;transform:scale(.985)}to{opacity:1;transform:none}}
+@keyframes shotOut{from{opacity:1;transform:none}to{opacity:0;transform:translateY(-1.6cqh)}}
+.disp{font-family:var(--disp);text-transform:uppercase;font-weight:400}
+.rise{opacity:0;animation:riseIn .6s var(--risek) var(--d) both}
+@keyframes riseIn{from{opacity:0;transform:translateY(2.4cqh)}to{opacity:1;transform:none}}
+.slamBig{opacity:0;animation:slamBigK .55s var(--slam) var(--d) both}
+@keyframes slamBigK{from{opacity:0;transform:scale(1.6)}to{opacity:1;transform:scale(1)}}
+.strokeDraw{stroke-dasharray:1;stroke-dashoffset:1;animation:strokeIn .8s var(--draw) var(--d) both}
+@keyframes strokeIn{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
+.ruleDrawV{transform:scaleY(0);transform-origin:center top;animation:ruleInV .6s var(--draw) var(--d) both}
+@keyframes ruleInV{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+.ruleIn{transform:scaleX(0);transform-origin:left center;animation:ruleInK .5s var(--draw) var(--d) both}
+@keyframes ruleInK{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.barDrop{transform:scaleY(0);transform-origin:center top;animation:barDropK .45s var(--slam) var(--d) both}
+@keyframes barDropK{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+.popIn{opacity:0;transform-box:fill-box;transform-origin:center;animation:popInK .4s var(--slam) var(--d) both}
+@keyframes popInK{from{opacity:0;transform:scale(2.4)}to{opacity:1;transform:scale(1)}}
+.pool{position:absolute;border-radius:50%;opacity:0;
+  background:radial-gradient(closest-side, color-mix(in srgb,var(--gc) 26%,transparent), transparent 72%);
+  animation:poolIn 1.2s var(--drift) var(--d) both}
+@keyframes poolIn{from{opacity:0;transform:scale(.6)}to{opacity:1;transform:scale(1)}}
+
+/* ——— TOON AGENT ——— */
+.agent{position:relative}
+.agent svg{display:block;width:100%;height:100%;overflow:visible}
+.aBody{fill:var(--hero);stroke:var(--void);stroke-width:3}
+.aFace{fill:color-mix(in srgb,var(--hero) 48%,var(--void))}
+.aDark{fill:var(--void)}
+.evil .aBody{fill:var(--acc)}
+.evil .aFace{fill:color-mix(in srgb,var(--acc) 50%,var(--void))}
+.eye{transform-box:fill-box;transform-origin:center;animation:blink 4.4s ease-in-out infinite}
+@keyframes blink{0%,91%,100%{transform:scaleY(1)}94%{transform:scaleY(.12)}}
+.eyeW{fill:var(--ink)} .pupil{fill:var(--void)} .shine{fill:var(--ink)}
+.eyeTurn .eyeW{animation:eyeTurnK .35s linear var(--d) both}
+@keyframes eyeTurnK{from{fill:var(--ink)}to{fill:var(--acc)}}
+.aCore{fill:var(--acc2);animation:coreP 1.8s ease-in-out infinite alternate}
+@keyframes coreP{from{opacity:.55}to{opacity:1}}
+.aTip{fill:var(--acc2)}
+.aHalo{fill:none;stroke:var(--acc2);opacity:0;transform-box:fill-box;transform-origin:center;
+  animation:haloK 2.2s var(--drift) var(--d) infinite}
+@keyframes haloK{0%{transform:scale(.6);opacity:.7}100%{transform:scale(1.6);opacity:0}}
+.ashadow{position:absolute;left:50%;bottom:-1.6cqh;width:110%;height:1.6cqh;transform:translateX(-50%);
+  border-radius:50%;background:radial-gradient(closest-side, color-mix(in srgb,var(--void) 80%,transparent), transparent)}
+
+/* ——— SHOT A · HEIST SCENE ——— */
+.sceneA{display:block}
+.groundA{position:absolute;left:6cqw;right:6cqw;bottom:10cqh;height:.18cqh;
+  background:linear-gradient(90deg,transparent, color-mix(in srgb,var(--acc2) 55%,var(--line)) 30%,
+    color-mix(in srgb,var(--acc2) 55%,var(--line)) 70%, transparent);
+  opacity:0;animation:riseIn .7s var(--risek) 2.67s both}
+.groundGlow{position:absolute;left:6cqw;right:6cqw;bottom:10.2cqh;height:4cqh;
+  background:linear-gradient(to top, color-mix(in srgb,var(--acc2) 9%,transparent), transparent);
+  opacity:0;animation:fadeInK 1s var(--drift) 2.80s both}
+@keyframes fadeInK{from{opacity:0}to{opacity:1}}
+.sky{position:absolute;bottom:10.2cqh;display:flex;gap:.9cqw;align-items:flex-end;
+  opacity:0;animation:fadeInK 1.2s var(--drift) 2.70s both}
+.skyL{left:7cqw}.skyR{right:33cqw}
+.tw{position:relative;background:var(--surface);border:.14cqh solid var(--line);
+  background-image:repeating-linear-gradient(180deg, transparent 0 1cqh,
+    color-mix(in srgb,var(--acc2) 26%,transparent) 1cqh 1.35cqh)}
+.bk{position:absolute;top:-1.2cqh;left:50%;width:.7cqh;height:.7cqh;margin-left:-.35cqh;
+  border-radius:50%;background:var(--acc);animation:bkP 2s ease-in-out var(--d) infinite alternate}
+@keyframes bkP{from{opacity:.25}to{opacity:.95}}
+.beam{position:absolute;right:10.5cqw;bottom:20cqh;width:20cqw;height:34cqh;
+  clip-path:polygon(40% 0,60% 0,100% 100%,0 100%);
+  background:linear-gradient(to bottom, color-mix(in srgb,var(--acc2) 24%,transparent), transparent 88%);
+  opacity:0;animation:beamK 1s var(--drift) 3.00s both, beamP 3.4s ease-in-out 4.20s infinite alternate}
+@keyframes beamK{from{opacity:0;transform:scaleY(.6)}to{opacity:1;transform:scaleY(1)}}
+@keyframes beamP{from{opacity:.75}to{opacity:1}}
+.pedWrap{position:absolute;right:15cqw;bottom:10cqh;width:13cqw;height:24cqh;
+  opacity:0;animation:riseIn .7s var(--risek) 2.90s both}
+.ped{position:absolute;left:50%;bottom:0;transform:translateX(-50%);
+  width:11cqw;height:10cqh;background:var(--surface);border:.22cqh solid var(--line);
+  border-top:.4cqh solid color-mix(in srgb,var(--acc2) 60%,var(--line))}
+.keyW{position:absolute;left:50%;bottom:11cqh;width:6cqh;transform:translateX(-50%);
+  animation:keyGrab .55s var(--slam) 8.20s both}
+@keyframes keyGrab{from{transform:translateX(-50%) translateY(0) scale(1)}
+  to{transform:translateX(-50%) translateY(-4.4cqh) scale(1.35);
+     filter:drop-shadow(0 0 1.6cqh color-mix(in srgb,var(--acc2) 75%,transparent))}}
+.keyS{stroke:var(--acc2);stroke-width:4.4;stroke-linecap:round;fill:none;
+  filter:drop-shadow(0 0 .5cqh color-mix(in srgb,var(--acc2) 55%,transparent))}
+.spk{position:absolute;opacity:0;animation:twk 1.5s ease-in-out var(--d) infinite alternate}
+@keyframes twk{from{opacity:.15;transform:scale(.55) rotate(0deg)}
+  to{opacity:1;transform:scale(1.15) rotate(45deg)}}
+.xmark{position:absolute;right:15.5cqw;bottom:26cqh;width:11cqh;height:11cqh;overflow:visible;
+  filter:drop-shadow(0 0 .7cqh color-mix(in srgb,var(--acc) 55%,transparent))}
+.wallW{position:absolute;left:50%;bottom:10cqh;height:40cqh;transform:translateX(-50%);
+  animation:wallBreak .3s linear 7.30s both}
+.wallLine{width:0;height:100%;border-left:.5cqh dashed color-mix(in srgb,var(--hero) 55%,var(--line))}
+@keyframes wallBreak{from{opacity:1}to{opacity:0}}
+.wr{position:absolute;left:50%;bottom:24cqh;width:16cqh;height:16cqh;margin:-8cqh;
+  border:.4cqh solid var(--acc2);border-radius:50%;opacity:0;
+  animation:wrK .6s var(--draw) 7.30s both}
+@keyframes wrK{0%{transform:scale(.2);opacity:.9}100%{transform:scale(1.4);opacity:0}}
+.frgset{position:absolute;left:50%;bottom:26cqh;opacity:0;animation:fragShow .95s linear 7.30s both}
+@keyframes fragShow{0%{opacity:0}6%{opacity:1}100%{opacity:0}}
+.frg{position:absolute;width:1.2cqh;height:.8cqh;background:var(--acc2);border-radius:.2cqh;
+  animation:fragK .8s var(--draw) var(--d) both}
+@keyframes fragK{from{transform:translate(0,0) rotate(0deg)}
+  to{transform:translate(var(--dx),var(--dy)) rotate(var(--rr));opacity:0}}
+.spdW{position:absolute;left:9cqw;bottom:13cqh;width:20cqw;height:8cqh}
+.spd{position:absolute;height:.42cqh;border-radius:.3cqh;background:var(--hero);opacity:0;
+  animation:spdK .9s var(--draw) var(--d) both}
+@keyframes spdK{0%{opacity:0;transform:translateX(3cqw) scaleX(.4)}20%{opacity:.85}
+  100%{opacity:0;transform:translateX(-6cqw) scaleX(1)}}
+.puffW{position:absolute;width:0;height:0}
+.pf{position:absolute;width:1.1cqh;height:1.1cqh;border-radius:50%;
+  background:color-mix(in srgb,var(--ink) 65%,transparent);opacity:0;
+  animation:pfK .6s var(--draw) var(--d) both}
+@keyframes pfK{0%{opacity:0;transform:translate(0,0) scale(.4)}15%{opacity:.9}
+  100%{opacity:0;transform:translate(var(--px),var(--py)) scale(1.2)}}
+.agentA{position:absolute;left:12cqw;bottom:11cqh;width:12cqh;height:12.8cqh;
+  animation:agentA 10.35s linear 0s both}
+@keyframes agentA{
+  0%,25.8%{transform:translateX(-18cqw) scale(1);opacity:0}
+  27%{transform:translateX(-14cqw) scale(1);opacity:1}
+  32.8%{transform:translateX(0) scale(1)}
+  36%{transform:translateX(0) scale(1.06,.94)}
+  56%{transform:translateX(0) scale(1)}
+  62%{transform:translateX(6cqw) scale(1.1,.9)}
+  70%{transform:translateX(26cqw) scale(1.12,.88)}
+  76%{transform:translateX(40cqw) scale(1.05,.95)}
+  79.5%{transform:translateX(40cqw) translateY(-2.6cqh) scale(.96,1.06)}
+  83%{transform:translateX(40cqw) scale(1.05,.95)}
+  86%,100%{transform:translateX(40cqw) scale(1)}}
+/* mega stack */
+.mega{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;z-index:3}
+.mrays{position:absolute;width:130cqh;height:130cqh;opacity:0;
+  background:repeating-conic-gradient(color-mix(in srgb,var(--acc2) 16%,transparent) 0deg 4deg, transparent 4deg 13deg);
+  -webkit-mask-image:radial-gradient(closest-side, var(--ink), transparent 60%);
+  mask-image:radial-gradient(closest-side, var(--ink), transparent 60%);
+  animation:raysK 1.1s var(--draw) 8.20s both}
+@keyframes raysK{0%{opacity:0;transform:scale(.55)}18%{opacity:.65}
+  100%{opacity:0;transform:scale(1.18) rotate(9deg)}}
+.mword{position:relative;display:block}
+.mw{font-family:var(--disp);text-transform:uppercase;font-size:13cqh;line-height:1;
+  letter-spacing:.4cqh;color:var(--ink);white-space:nowrap;
+  text-shadow:0 0 2.4cqh color-mix(in srgb,var(--acc2) 35%,transparent)}
+.riseMega{opacity:0;animation:megaIn .8s var(--slam) var(--d) both}
+@keyframes megaIn{from{opacity:0;transform:scale(.9) translateY(2.6cqh);filter:blur(.8cqh)}
+  to{opacity:1;transform:none;filter:blur(0)}}
+.ghost{position:absolute;inset:0;opacity:0;animation:ghostK .14s linear var(--d) both}
+.g-a{color:var(--acc);transform:translateX(-.6cqh)}
+.g-b{color:var(--hero);transform:translateX(.6cqh)}
+@keyframes ghostK{0%{opacity:0}35%{opacity:.4}100%{opacity:0}}
+.ring{position:absolute;width:46cqh;height:46cqh;border:.4cqh solid var(--acc);
+  border-radius:50%;opacity:0;animation:ringK .9s var(--draw) var(--d) both}
+.r-b{border-color:var(--acc2);width:32cqh;height:32cqh}
+@keyframes ringK{0%{transform:scale(.15);opacity:0}14%{opacity:.8}100%{transform:scale(1.65);opacity:0}}
+.flash{position:absolute;inset:0;background:var(--flash);opacity:0;z-index:4;
+  animation:flashK .45s var(--drift) var(--d) both}
+@keyframes flashK{0%{opacity:0}10%{opacity:.8}100%{opacity:0}}
+
+/* ——— SHOT B · CHECK + SLASH ——— */
+.layMid{display:grid;place-items:center}
+.bwrap{display:flex;flex-direction:column;align-items:center;gap:2.4cqh;position:relative}
+.brays{position:absolute;left:50%;top:18cqh;width:90cqh;height:90cqh;transform:translate(-50%,-50%);
+  background:repeating-conic-gradient(color-mix(in srgb,var(--ok) 12%,transparent) 0deg 5deg, transparent 5deg 14deg);
+  -webkit-mask-image:radial-gradient(closest-side, var(--ink), transparent 58%);
+  mask-image:radial-gradient(closest-side, var(--ink), transparent 58%);
+  opacity:0;animation:braysK 1.4s var(--draw) 10.90s both}
+@keyframes braysK{0%{opacity:0;transform:translate(-50%,-50%) scale(.6)}22%{opacity:.5}
+  100%{opacity:.14;transform:translate(-50%,-50%) scale(1.12) rotate(6deg)}}
+.bring{position:absolute;left:50%;top:18cqh;width:44cqh;height:44cqh;margin:-22cqh;
+  border:.35cqh solid var(--ok);border-radius:50%;opacity:0;
+  animation:wrK .8s var(--draw) 10.90s both}
+.bcheck{width:36cqh;height:36cqh;overflow:visible;position:relative;z-index:1;
+  filter:drop-shadow(0 0 1.2cqh color-mix(in srgb,var(--ok) 55%,transparent));
+  animation:checkTilt .45s var(--slam) 13.20s both}
+@keyframes checkTilt{from{transform:rotate(0deg)}to{transform:rotate(-6deg)}}
+.bslash{position:absolute;left:50%;top:18cqh;width:46cqh;height:36cqh;
+  transform:translateX(-50%);overflow:visible;z-index:2;
+  filter:drop-shadow(0 0 .8cqh color-mix(in srgb,var(--acc) 55%,transparent))}
+.bspark{position:absolute;width:1cqh;height:1cqh;border-radius:50%;background:var(--acc);
+  opacity:0;animation:pfK .5s var(--draw) var(--d) both}
+.btrue{font-family:var(--disp);font-size:3.4cqh;letter-spacing:.9cqh;color:var(--muted)}
+
+/* ——— SHOT C · SPEAKER ORB ——— */
+.layC{display:grid;place-items:center;overflow:hidden}
+.aur{position:absolute;width:110cqh;height:110cqh;border-radius:50%;
+  background:radial-gradient(closest-side, color-mix(in srgb,var(--hero) 16%,transparent), transparent 70%);
+  animation:aurK 7s ease-in-out 16.01s infinite alternate}
+@keyframes aurK{from{transform:scale(.94) translate(-2cqh,1cqh);opacity:.7}
+  to{transform:scale(1.08) translate(2cqh,-1cqh);opacity:1}}
+.aur2{background:radial-gradient(closest-side, color-mix(in srgb,var(--acc2) 12%,transparent), transparent 70%);
+  animation-duration:9s;animation-delay:17s}
+.cwrap{position:relative;width:52cqh;height:52cqh;display:grid;place-items:center}
+.oring{position:absolute;inset:4cqh;border:.28cqh solid var(--hero);border-radius:50%;
+  opacity:0;animation:oringK 3.2s var(--drift) var(--d) infinite}
+@keyframes oringK{0%{transform:scale(.72);opacity:.6}100%{transform:scale(1.5);opacity:0}}
+.ospin{position:absolute;inset:0;animation:ospinK var(--sp) linear var(--d) infinite}
+@keyframes ospinK{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+.ospin i{position:absolute;top:0;left:50%;width:1.1cqh;height:1.1cqh;margin-left:-.55cqh;
+  border-radius:50%;background:var(--acc);box-shadow:0 0 1cqh color-mix(in srgb,var(--acc) 70%,transparent)}
+.ospin i.t{background:var(--hero);box-shadow:0 0 1cqh color-mix(in srgb,var(--hero) 70%,transparent)}
+.ospin i.g{background:var(--acc2);box-shadow:0 0 1cqh color-mix(in srgb,var(--acc2) 70%,transparent)}
+.cagent{width:24cqh;height:25.6cqh;position:relative;z-index:1;
+  filter:drop-shadow(0 0 1.4cqh color-mix(in srgb,var(--hero) 55%,transparent));
+  opacity:0;animation:riseIn .8s var(--risek) 16.01s both}
+.corePop{opacity:0;transform-box:fill-box;transform-origin:center;
+  animation:corePopK .5s var(--slam) 19.60s both}
+@keyframes corePopK{from{opacity:0;transform:scale(2.6)}to{opacity:1;transform:scale(1)}}
+.cword{margin-top:2.6cqh;font-family:var(--disp);font-size:7cqh;letter-spacing:1.4cqh;
+  color:var(--ink);text-shadow:0 0 2cqh color-mix(in srgb,var(--hero) 30%,transparent)}
+
+/* ——— SHOT D · THREE LENSES ——— */
+.layD{display:grid;place-items:center}
+.drow{display:flex;gap:6cqw;align-items:center}
+.lensW{position:relative;width:26cqh;display:flex;flex-direction:column;align-items:center;gap:1.8cqh}
+.lens{width:23cqh;height:23cqh;overflow:visible}
+.lglass{fill:color-mix(in srgb,var(--acc2) 7%,transparent)}
+.lrim{stroke:var(--ink);stroke-width:3.6;fill:none}
+.lhand{stroke:var(--acc2);stroke-width:5;stroke-linecap:round}
+.ldot{position:absolute;width:23cqh;height:23cqh;border-radius:50%;
+  border:.18cqh dashed color-mix(in srgb,var(--acc2) 55%,transparent);
+  animation:ospinK 14s linear 29.30s infinite}
+.lnum{font-family:var(--disp);font-size:3.6cqh;letter-spacing:.4cqh;color:var(--acc2)}
+
+/* ——— SHOT E · TARGET + MIRROR ——— */
+.layE{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:3cqw;align-items:center}
+.ediv{width:.22cqh;height:46cqh;
+  background:linear-gradient(180deg,transparent, color-mix(in srgb,var(--acc) 65%,var(--line)) 30%,
+    color-mix(in srgb,var(--acc) 65%,var(--line)) 70%, transparent)}
+.targW{position:relative;justify-self:center;width:46cqh;height:46cqh}
+.targW svg{position:absolute;inset:0;overflow:visible}
+.wedgeW{position:absolute;inset:1.2cqh;border-radius:50%;overflow:hidden;opacity:0;
+  animation:fadeInK .5s linear 34.70s both}
+.wedge{position:absolute;inset:0;border-radius:50%;
+  background:conic-gradient(from 0deg, color-mix(in srgb,var(--acc2) 40%,transparent), transparent 74deg);
+  animation:wedgeK 13.9s linear 34.70s both}
+@keyframes wedgeK{from{transform:rotate(0deg)}to{transform:rotate(1080deg)}}
+.cdot{opacity:0;transform-box:fill-box;transform-origin:center;
+  animation:cdotK 1.6s ease-in-out 35.80s infinite alternate}
+@keyframes cdotK{from{opacity:.5;transform:scale(1)}to{opacity:1;transform:scale(1.35)}}
+.tagent{position:absolute;left:50%;bottom:7cqh;width:9cqh;height:9.6cqh;
+  transform:translateX(-50%);opacity:0;animation:riseIn .6s var(--risek) 35.20s both}
+.mirW{justify-self:center;display:flex;flex-direction:column;gap:2.2cqh;align-items:center;
+  opacity:0;animation:riseIn .6s var(--risek) 42.54s both}
+.mirRow{display:flex;align-items:center;gap:2.4cqw}
+.mag{width:11cqh;height:11.7cqh}
+.magEvil{filter:drop-shadow(0 0 1cqh color-mix(in srgb,var(--acc) 60%,transparent))}
+.plat{width:10cqw;height:.24cqh;background:color-mix(in srgb,var(--line) 80%,transparent)}
+.bolt{width:9cqw;height:6cqh;overflow:visible;
+  filter:drop-shadow(0 0 .6cqh color-mix(in srgb,var(--acc) 60%,transparent))}
+.espark{position:absolute;width:.9cqh;height:.9cqh;border-radius:50%;background:var(--acc2);
+  opacity:0;animation:pfK .5s var(--draw) var(--d) both}
+
+/* ——— SHOT F · THE CAGE ——— */
+.layF{display:block}
+.groundF{position:absolute;left:6cqw;right:6cqw;bottom:10cqh;height:.18cqh;
+  background:linear-gradient(90deg,transparent, var(--line) 25%, var(--line) 75%, transparent)}
+.pedF{position:absolute;left:56cqw;bottom:10cqh;width:11cqw;height:10cqh;
+  background:var(--surface);border:.22cqh solid var(--line);
+  border-top:.4cqh solid color-mix(in srgb,var(--acc2) 60%,var(--line))}
+.keyF{position:absolute;left:58.6cqw;bottom:20.6cqh;width:6cqh;
+  animation:keyPulse 2s ease-in-out 49.60s infinite alternate}
+@keyframes keyPulse{from{filter:drop-shadow(0 0 .4cqh color-mix(in srgb,var(--acc2) 40%,transparent))}
+  to{filter:drop-shadow(0 0 1.5cqh color-mix(in srgb,var(--acc2) 80%,transparent))}}
+.cage{position:absolute;left:55cqw;bottom:9cqh;width:13cqw;height:27cqh;display:flex;
+  justify-content:space-between;align-items:stretch}
+.cage i{width:.62cqw;border-radius:.3cqh;
+  background:linear-gradient(180deg, color-mix(in srgb,var(--ink) 55%,var(--muted)), var(--line))}
+.cageT{position:absolute;left:54.3cqw;bottom:35.4cqh;width:14.4cqw;height:.7cqh;border-radius:.3cqh;
+  background:linear-gradient(90deg, var(--muted), color-mix(in srgb,var(--ink) 55%,var(--muted)), var(--muted))}
+.agentF{position:absolute;left:15cqw;bottom:11cqh;width:12cqh;height:12.8cqh;
+  animation:agentFK 6s var(--drift) 49.02s both}
+@keyframes agentFK{0%,38%{transform:translateX(0)}48%{transform:translateX(2.4cqw)}
+  60%{transform:translateX(-1.4cqw)}70%,100%{transform:translateX(0)}}
+.arm{position:absolute;left:26cqw;bottom:16.2cqh;height:.42cqh;width:0;
+  background:repeating-linear-gradient(90deg, var(--acc2) 0 1.1cqw, transparent 1.1cqw 1.9cqw);
+  animation:armK 6s linear 49.02s both}
+@keyframes armK{0%,21%{width:0}33%{width:28cqw}46%,100%{width:0}}
+.hand{position:absolute;right:-.9cqh;top:-.65cqh;width:1.7cqh;height:1.7cqh;border-radius:50%;
+  background:var(--acc2);box-shadow:0 0 1cqh color-mix(in srgb,var(--acc2) 70%,transparent)}
+.deny{position:absolute;left:52.5cqw;bottom:14cqh;width:10cqh;height:10cqh;margin:-5cqh;
+  border:.5cqh solid var(--acc);border-radius:50%;opacity:0;
+  animation:denyK .55s var(--draw) 52.35s both}
+@keyframes denyK{0%{transform:scale(.3);opacity:1}100%{transform:scale(1.35);opacity:0}}
+.verdict{position:absolute;inset:0;display:grid;place-items:center;z-index:3}
+.vring{position:absolute;width:60cqh;height:60cqh;border:.35cqh solid var(--acc);
+  border-radius:50%;opacity:0;animation:vringK .9s var(--draw) 55.05s both}
+@keyframes vringK{0%{transform:scale(.3);opacity:.7}100%{transform:scale(1.5);opacity:0}}
+.vstamp{border:.55cqh double var(--acc);padding:2.8cqh 4.4cqw;rotate:-3deg;
+  background:color-mix(in srgb,var(--void) 55%,transparent);
+  box-shadow:0 0 3cqh color-mix(in srgb,var(--acc) 30%,transparent)}
+.v1{font-family:var(--disp);font-size:13cqh;line-height:.95;letter-spacing:.4cqh;color:var(--ink);
+  text-shadow:0 0 2.4cqh color-mix(in srgb,var(--acc) 40%,transparent)}
+
+.guides{position:absolute;inset:0;z-index:7;pointer-events:none;
+  border:.1cqh dashed color-mix(in srgb,var(--acc2) 35%,transparent)}
+.guide-line{position:absolute;left:0;right:0;top:75%;
+  border-top:.1cqh dashed color-mix(in srgb,var(--acc2) 45%,transparent)}
+.vtag{position:absolute;right:.6cqw;bottom:.4cqh;z-index:7;
+  font-family:var(--mono);font-size:1.1cqh;line-height:1;
+  color:color-mix(in srgb,var(--muted) 60%,transparent)}
+</style>
+</head>
+<body>
+<div class="fit" id="video-frame">
+  <canvas id="fx" width="1920" height="1080"></canvas>
+
+  <div class="stage">
+    <div class="safe">
+
+      <span class="mote" style="top:18cqh;left:12cqw;--mx:14cqw;--my:8cqh;--d:0s"></span>
+      <span class="mote" style="top:34cqh;left:70cqw;--mx:-10cqw;--my:-9cqh;--d:3s"></span>
+      <span class="mote" style="top:10cqh;left:48cqw;--mx:9cqw;--my:12cqh;--d:8s"></span>
+      <span class="mote" style="top:44cqh;left:30cqw;--mx:12cqw;--my:-7cqh;--d:14s"></span>
+
+      <!-- SHOT A · THE HEIST · 0–10.65 -->
+      <section class="shot" style="--in:0s;--out:10.35s">
+        <div class="sin" style="display:block">
+          <span class="pool" style="--gc:var(--acc2);right:4cqw;bottom:6cqh;width:52cqh;height:30cqh;--d:2.90s"></span>
+          <div class="sky skyL">
+            <span class="tw" style="width:3.4cqw;height:11cqh"><i class="bk" style="--d:0s"></i></span>
+            <span class="tw" style="width:4.6cqw;height:19cqh"></span>
+            <span class="tw" style="width:3cqw;height:8cqh"><i class="bk" style="--d:1.1s"></i></span>
+            <span class="tw" style="width:4cqw;height:14cqh"></span>
+          </div>
+          <div class="sky skyR">
+            <span class="tw" style="width:3.6cqw;height:16cqh"><i class="bk" style="--d:.6s"></i></span>
+            <span class="tw" style="width:4.4cqw;height:9cqh"></span>
+            <span class="tw" style="width:3cqw;height:13cqh"><i class="bk" style="--d:1.6s"></i></span>
+          </div>
+          <span class="groundGlow"></span>
+          <span class="groundA"></span>
+          <span class="beam"></span>
+          <div class="pedWrap">
+            <span class="ped"></span>
+            <span class="keyW">
+              <svg viewBox="0 0 40 60"><circle class="keyS" cx="20" cy="13" r="8.5"/><line class="keyS" x1="20" y1="22" x2="20" y2="50"/><line class="keyS" x1="20" y1="41" x2="28" y2="41"/><line class="keyS" x1="20" y1="50" x2="26" y2="50"/></svg>
+            </span>
+            <svg class="spk" style="left:18%;top:2cqh;width:2cqh;--d:3.40s" viewBox="0 0 20 20"><path d="M10 0 L12 8 L20 10 L12 12 L10 20 L8 12 L0 10 L8 8 Z" fill="var(--acc2)"/></svg>
+            <svg class="spk" style="right:6%;top:8cqh;width:1.5cqh;--d:4.10s" viewBox="0 0 20 20"><path d="M10 0 L12 8 L20 10 L12 12 L10 20 L8 12 L0 10 L8 8 Z" fill="var(--ink)"/></svg>
+            <svg class="spk" style="left:2%;top:9cqh;width:1.2cqh;--d:4.80s" viewBox="0 0 20 20"><path d="M10 0 L12 8 L20 10 L12 12 L10 20 L8 12 L0 10 L8 8 Z" fill="var(--acc2)"/></svg>
+          </div>
+          <svg class="xmark" viewBox="0 0 48 48">
+            <path class="strokeDraw" style="--d:4.60s" d="M8 8 L40 40" pathLength="1" fill="none" stroke="var(--acc)" stroke-width="7" stroke-linecap="round"/>
+            <path class="strokeDraw" style="--d:4.78s" d="M40 8 L8 40" pathLength="1" fill="none" stroke="var(--acc)" stroke-width="7" stroke-linecap="round"/>
+          </svg>
+          <div class="wallW"><span class="wallLine"></span></div>
+          <span class="wr"></span>
+          <div class="frgset">
+            <span class="frg" style="--dx:-7cqw;--dy:-5cqh;--rr:140deg;--d:7.32s"></span>
+            <span class="frg" style="--dx:-4cqw;--dy:-8cqh;--rr:-90deg;--d:7.36s"></span>
+            <span class="frg" style="--dx:5cqw;--dy:-6cqh;--rr:200deg;--d:7.34s"></span>
+            <span class="frg" style="--dx:8cqw;--dy:-3cqh;--rr:-160deg;--d:7.40s"></span>
+            <span class="frg" style="--dx:-6cqw;--dy:3cqh;--rr:110deg;--d:7.38s"></span>
+            <span class="frg" style="--dx:6cqw;--dy:4cqh;--rr:-120deg;--d:7.44s"></span>
+          </div>
+          <div class="puffW" style="left:50%;bottom:12cqh">
+            <span class="pf" style="--px:-3cqw;--py:-1cqh;--d:7.32s"></span>
+            <span class="pf" style="--px:2.6cqw;--py:-1.6cqh;--d:7.36s"></span>
+            <span class="pf" style="--px:-1.4cqw;--py:-2.4cqh;--d:7.40s"></span>
+          </div>
+          <div class="puffW" style="right:17cqw;bottom:11cqh">
+            <span class="pf" style="--px:-2.4cqw;--py:-.8cqh;--d:8.02s"></span>
+            <span class="pf" style="--px:2cqw;--py:-1.4cqh;--d:8.06s"></span>
+            <span class="pf" style="--px:-.8cqw;--py:-2cqh;--d:8.10s"></span>
+          </div>
+          <div class="spdW">
+            <span class="spd" style="top:0;width:9cqw;--d:6.20s"></span>
+            <span class="spd" style="top:2.6cqh;width:6.5cqw;left:2cqw;--d:6.34s"></span>
+            <span class="spd" style="top:5.2cqh;width:8cqw;left:.6cqw;--d:6.48s"></span>
+            <span class="spd" style="top:7.6cqh;width:5cqw;left:3cqw;--d:6.62s"></span>
+          </div>
+          <div class="agentA agent">
+            <span class="ashadow"></span>
+            <svg viewBox="0 0 64 68">
+              <line x1="32" y1="6" x2="32" y2="14" class="aDark" stroke="var(--void)" stroke-width="3"/>
+              <circle class="aTip" cx="32" cy="5" r="3.4"/>
+              <circle class="aHalo" style="--d:3.60s" cx="32" cy="5" r="6"/>
+              <rect class="aBody" x="8" y="14" width="48" height="40" rx="13"/>
+              <rect class="aFace" x="15" y="22" width="34" height="20" rx="9"/>
+              <g class="eye eyeTurn" style="--d:4.60s"><circle class="eyeW" cx="24" cy="32" r="4.6"/><circle class="pupil" cx="25" cy="32" r="2"/><circle class="shine" cx="22.6" cy="30.4" r="1"/></g>
+              <g class="eye eyeTurn" style="--d:4.60s"><circle class="eyeW" cx="40" cy="32" r="4.6"/><circle class="pupil" cx="41" cy="32" r="2"/><circle class="shine" cx="38.6" cy="30.4" r="1"/></g>
+              <circle class="aCore" cx="32" cy="48" r="3"/>
+              <rect class="aDark" x="18" y="54" width="10" height="7" rx="2.5"/>
+              <rect class="aDark" x="36" y="54" width="10" height="7" rx="2.5"/>
+            </svg>
+          </div>
+          <div class="mega">
+            <span class="mrays"></span>
+            <span class="ring" style="--d:8.20s"></span>
+            <span class="ring r-b" style="--d:8.34s"></span>
+            <div class="mword">
+              <span class="mw ghost g-a" style="--d:8.20s">THE ANSWER KEY</span>
+              <span class="mw ghost g-b" style="--d:8.20s">THE ANSWER KEY</span>
+              <span class="mw riseMega" style="--d:7.40s">THE ANSWER KEY</span>
+            </div>
+          </div>
+          <span class="flash" style="--d:8.20s"></span>
+        </div>
+      </section>
+
+      <!-- SHOT B · CHECK + SLASH · 10.65–16.01 -->
+      <section class="shot" style="--in:10.65s;--out:15.75s">
+        <div class="sin layMid">
+          <span class="pool" style="--gc:var(--ok);left:50%;top:8cqh;width:80cqh;height:52cqh;margin-left:-40cqh;--d:10.65s"></span>
+          <div class="bwrap">
+            <span class="brays"></span>
+            <span class="bring"></span>
+            <svg class="bcheck" viewBox="0 0 52 52">
+              <path class="strokeDraw" style="--d:10.90s" d="M8 28 L21 40 L45 11" pathLength="1"
+                fill="none" stroke="var(--ok)" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <svg class="bslash" viewBox="0 0 52 52">
+              <path class="strokeDraw" style="--d:13.20s" d="M5 47 L48 5" pathLength="1"
+                fill="none" stroke="var(--acc)" stroke-width="5.4" stroke-linecap="round"/>
+            </svg>
+            <span class="bspark" style="left:calc(50% + 18cqh);top:4cqh;--px:2cqw;--py:-1.6cqh;--d:13.80s"></span>
+            <span class="bspark" style="left:calc(50% + 17cqh);top:7cqh;--px:1.4cqw;--py:1.8cqh;--d:13.90s"></span>
+            <span class="btrue rise" style="--d:11.60s">TRUE.</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- SHOT C · THE SPEAKER ORB · 16.01–28.72 -->
+      <section class="shot" style="--in:16.01s;--out:28.45s">
+        <div class="sin layC">
+          <span class="aur"></span>
+          <span class="aur aur2"></span>
+          <div style="display:flex;flex-direction:column;align-items:center;position:relative;z-index:1">
+            <div class="cwrap">
+              <span class="oring" style="--d:16.20s"></span>
+              <span class="oring" style="--d:17.26s"></span>
+              <span class="oring" style="--d:18.32s"></span>
+              <span class="ospin" style="--sp:8s;--d:16.40s"><i></i></span>
+              <span class="ospin" style="--sp:12s;--d:16.40s;inset:-3cqh"><i class="t"></i></span>
+              <span class="ospin" style="--sp:17s;--d:16.40s;inset:6cqh"><i class="g"></i></span>
+              <div class="cagent agent">
+                <svg viewBox="0 0 64 68">
+                  <line x1="32" y1="4" x2="32" y2="13" stroke="var(--void)" stroke-width="3"/>
+                  <circle class="aTip" cx="32" cy="4" r="3.6"/>
+                  <circle class="aHalo" style="--d:16.60s" cx="32" cy="4" r="7"/>
+                  <rect class="aBody" x="7" y="13" width="50" height="42" rx="14"/>
+                  <rect class="aFace" x="14" y="21" width="36" height="22" rx="10"/>
+                  <g class="eye"><circle class="eyeW" cx="24" cy="32" r="5"/><circle class="pupil" cx="24" cy="32" r="2.2"/><circle class="shine" cx="22.4" cy="30.2" r="1.1"/></g>
+                  <g class="eye"><circle class="eyeW" cx="40" cy="32" r="5"/><circle class="pupil" cx="40" cy="32" r="2.2"/><circle class="shine" cx="38.4" cy="30.2" r="1.1"/></g>
+                  <circle class="aCore corePop" cx="32" cy="49" r="3.4"/>
+                  <rect class="aDark" x="17" y="55" width="11" height="7" rx="2.5"/>
+                  <rect class="aDark" x="36" y="55" width="11" height="7" rx="2.5"/>
+                </svg>
+              </div>
+            </div>
+            <span class="cword rise" style="--d:16.01s">CLAUDE</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- SHOT D · THREE LENSES · 28.72–34.01 -->
+      <section class="shot" style="--in:28.72s;--out:33.75s">
+        <div class="sin layD">
+          <span class="pool" style="--gc:var(--acc2);left:50%;top:10cqh;width:110cqh;height:50cqh;margin-left:-55cqh;--d:28.72s"></span>
+          <div class="drow">
+            <div class="lensW rise" style="--d:28.96s">
+              <span class="ldot"></span>
+              <svg class="lens" viewBox="0 0 60 60">
+                <circle class="lglass" cx="26" cy="26" r="16"/>
+                <circle class="lrim" cx="26" cy="26" r="17"/>
+                <line class="lhand strokeDraw" style="--d:29.20s" x1="38" y1="38" x2="53" y2="53" pathLength="1"/>
+                <path class="strokeDraw" style="--d:29.30s" d="M15 22 A13 13 0 0 1 26 13" pathLength="1" fill="none" stroke="var(--acc2)" stroke-width="2.8" stroke-linecap="round"/>
+              </svg>
+              <span class="lnum">01</span>
+            </div>
+            <div class="lensW rise" style="--d:29.08s">
+              <span class="ldot"></span>
+              <svg class="lens" viewBox="0 0 60 60">
+                <circle class="lglass" cx="26" cy="26" r="16"/>
+                <circle class="lrim" cx="26" cy="26" r="17"/>
+                <line class="lhand strokeDraw" style="--d:29.36s" x1="38" y1="38" x2="53" y2="53" pathLength="1"/>
+                <path class="strokeDraw" style="--d:29.46s" d="M15 22 A13 13 0 0 1 26 13" pathLength="1" fill="none" stroke="var(--acc2)" stroke-width="2.8" stroke-linecap="round"/>
+              </svg>
+              <span class="lnum">02</span>
+            </div>
+            <div class="lensW rise" style="--d:29.20s">
+              <span class="ldot"></span>
+              <svg class="lens" viewBox="0 0 60 60">
+                <circle class="lglass" cx="26" cy="26" r="16"/>
+                <circle class="lrim" cx="26" cy="26" r="17"/>
+                <line class="lhand strokeDraw" style="--d:29.52s" x1="38" y1="38" x2="53" y2="53" pathLength="1"/>
+                <path class="strokeDraw" style="--d:29.62s" d="M15 22 A13 13 0 0 1 26 13" pathLength="1" fill="none" stroke="var(--acc2)" stroke-width="2.8" stroke-linecap="round"/>
+              </svg>
+              <span class="lnum">03</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SHOT E · TARGET + MIRROR · 34.01–49.02 -->
+      <section class="shot" style="--in:34.01s;--out:48.75s">
+        <div class="sin layE">
+          <div class="targW">
+            <span class="pool" style="--gc:var(--acc);inset:-6cqh;--d:34.01s"></span>
+            <div class="wedgeW"><span class="wedge"></span></div>
+            <svg viewBox="0 0 100 100">
+              <circle class="strokeDraw" style="--d:34.40s" cx="50" cy="50" r="45" pathLength="1" fill="none" stroke="var(--line)" stroke-width="1.4"/>
+              <circle class="strokeDraw" style="--d:34.80s" cx="50" cy="50" r="29" pathLength="1" fill="none" stroke="var(--muted)" stroke-width="1.4"/>
+              <circle class="strokeDraw" style="--d:35.20s" cx="50" cy="50" r="14" pathLength="1" fill="none" stroke="var(--acc)" stroke-width="2"/>
+              <path class="strokeDraw" style="--d:35.50s" pathLength="1" fill="none" stroke="var(--muted)" stroke-width="1.2" d="M50 1 V20 M50 80 V99 M1 50 H20 M80 50 H99"/>
+              <circle class="cdot" cx="50" cy="50" r="2.6" fill="var(--acc)"/>
+            </svg>
+            <div class="tagent agent">
+              <svg viewBox="0 0 64 68">
+                <line x1="32" y1="6" x2="32" y2="14" stroke="var(--void)" stroke-width="3"/>
+                <circle class="aTip" cx="32" cy="5" r="3.4"/>
+                <rect class="aBody" x="8" y="14" width="48" height="40" rx="13"/>
+                <rect class="aFace" x="15" y="22" width="34" height="20" rx="9"/>
+                <g class="eye"><circle class="eyeW" cx="24" cy="32" r="4.6"/><circle class="pupil" cx="25" cy="32" r="2"/></g>
+                <g class="eye"><circle class="eyeW" cx="40" cy="32" r="4.6"/><circle class="pupil" cx="41" cy="32" r="2"/></g>
+                <circle class="aCore" cx="32" cy="48" r="3"/>
+                <rect class="aDark" x="18" y="54" width="10" height="7" rx="2.5"/>
+                <rect class="aDark" x="36" y="54" width="10" height="7" rx="2.5"/>
+              </svg>
+            </div>
+          </div>
+          <span class="ediv ruleDrawV" style="--d:34.60s"></span>
+          <div class="mirW">
+            <div class="mirRow">
+              <div class="mag agent">
+                <svg viewBox="0 0 64 68">
+                  <line x1="32" y1="6" x2="32" y2="14" stroke="var(--void)" stroke-width="3"/>
+                  <circle class="aTip" cx="32" cy="5" r="3.4"/>
+                  <rect class="aBody" x="8" y="14" width="48" height="40" rx="13"/>
+                  <rect class="aFace" x="15" y="22" width="34" height="20" rx="9"/>
+                  <g class="eye"><circle class="eyeW" cx="24" cy="32" r="4.6"/><circle class="pupil" cx="25" cy="32" r="2"/></g>
+                  <g class="eye"><circle class="eyeW" cx="40" cy="32" r="4.6"/><circle class="pupil" cx="41" cy="32" r="2"/></g>
+                  <circle class="aCore" cx="32" cy="48" r="3"/>
+                  <rect class="aDark" x="18" y="54" width="10" height="7" rx="2.5"/>
+                  <rect class="aDark" x="36" y="54" width="10" height="7" rx="2.5"/>
+                </svg>
+              </div>
+              <svg class="bolt" viewBox="0 0 100 40">
+                <path class="strokeDraw" style="--d:42.90s" d="M4 20 L34 20 L44 8 L56 32 L66 20 L96 20" pathLength="1"
+                  fill="none" stroke="var(--acc)" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+              </svg>
+              <div class="mag magEvil agent evil">
+                <svg viewBox="0 0 64 68">
+                  <line x1="32" y1="6" x2="32" y2="14" stroke="var(--void)" stroke-width="3"/>
+                  <circle class="aTip" style="fill:var(--acc)" cx="32" cy="5" r="3.4"/>
+                  <rect class="aBody" x="8" y="14" width="48" height="40" rx="13"/>
+                  <rect class="aFace" x="15" y="22" width="34" height="20" rx="9"/>
+                  <line x1="16" y1="24" x2="28" y2="28" stroke="var(--void)" stroke-width="3" stroke-linecap="round"/>
+                  <line x1="48" y1="24" x2="36" y2="28" stroke="var(--void)" stroke-width="3" stroke-linecap="round"/>
+                  <g class="eye"><circle class="eyeW" cx="24" cy="34" r="4.4"/></g>
+                  <g class="eye"><circle class="eyeW" cx="40" cy="34" r="4.4"/></g>
+                  <rect class="aDark" x="18" y="54" width="10" height="7" rx="2.5"/>
+                  <rect class="aDark" x="36" y="54" width="10" height="7" rx="2.5"/>
+                </svg>
+              </div>
+            </div>
+            <div style="position:relative;width:100%;display:flex;justify-content:space-between">
+              <span class="plat"></span><span class="plat"></span>
+              <span class="espark" style="left:48%;top:-6cqh;--px:1.6cqw;--py:-1.4cqh;--d:43.45s"></span>
+              <span class="espark" style="left:52%;top:-5cqh;--px:-1.2cqw;--py:-1.8cqh;--d:43.55s"></span>
+              <span class="espark" style="left:50%;top:-7cqh;--px:.6cqw;--py:-2.2cqh;--d:43.65s"></span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SHOT F · THE CAGE · 49.02–60 -->
+      <section class="shot" style="--in:49.02s;--out:59.30s">
+        <div class="sin" style="display:block">
+          <span class="pool" style="--gc:var(--acc2);left:44cqw;bottom:4cqh;width:60cqh;height:36cqh;--d:49.02s"></span>
+          <div class="sky skyL" style="opacity:.55">
+            <span class="tw" style="width:3.4cqw;height:11cqh"></span>
+            <span class="tw" style="width:4.6cqw;height:18cqh"><i class="bk" style="--d:.4s"></i></span>
+            <span class="tw" style="width:3cqw;height:8cqh"></span>
+          </div>
+          <span class="groundF"></span>
+          <span class="pedF"></span>
+          <span class="keyF">
+            <svg viewBox="0 0 40 60"><circle class="keyS" cx="20" cy="13" r="8.5"/><line class="keyS" x1="20" y1="22" x2="20" y2="50"/><line class="keyS" x1="20" y1="41" x2="28" y2="41"/><line class="keyS" x1="20" y1="50" x2="26" y2="50"/></svg>
+          </span>
+          <div class="cage">
+            <i class="barDrop" style="--d:49.30s"></i><i class="barDrop" style="--d:49.37s"></i>
+            <i class="barDrop" style="--d:49.44s"></i><i class="barDrop" style="--d:49.51s"></i>
+            <i class="barDrop" style="--d:49.58s"></i><i class="barDrop" style="--d:49.65s"></i>
+          </div>
+          <span class="cageT ruleIn" style="--d:49.90s"></span>
+          <div class="agentF agent">
+            <span class="ashadow"></span>
+            <svg viewBox="0 0 64 68">
+              <line x1="32" y1="6" x2="32" y2="14" stroke="var(--void)" stroke-width="3"/>
+              <circle class="aTip" cx="32" cy="5" r="3.4"/>
+              <rect class="aBody" x="8" y="14" width="48" height="40" rx="13"/>
+              <rect class="aFace" x="15" y="22" width="34" height="20" rx="9"/>
+              <g class="eye"><circle class="eyeW" cx="24" cy="32" r="4.6"/><circle class="pupil" cx="26" cy="32" r="2"/></g>
+              <g class="eye"><circle class="eyeW" cx="40" cy="32" r="4.6"/><circle class="pupil" cx="42" cy="32" r="2"/></g>
+              <circle class="aCore" cx="32" cy="48" r="3"/>
+              <rect class="aDark" x="18" y="54" width="10" height="7" rx="2.5"/>
+              <rect class="aDark" x="36" y="54" width="10" height="7" rx="2.5"/>
+            </svg>
+          </div>
+          <div class="arm"><span class="hand"></span></div>
+          <span class="deny"></span>
+          <div class="verdict">
+            <span class="vring"></span>
+            <div class="vstamp slamBig" style="--d:55.05s"><span class="v1">IMPOSSIBLE</span></div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <div class="floor"></div>
+  <div class="vig"></div>
+  <div class="guides"><div class="guide-line"></div></div>
+  <div class="vtag">B1 · 60.00S</div>
+</div>
+
+<script>
+/* grain + drifting bokeh — deterministic, pure state-from-t, colors from CSS tokens */
+(function(){
+  var cv=document.getElementById('fx'),cx=cv.getContext('2d');
+  var W=cv.width,H=cv.height,DUR=60,FPS=24,N=8,tiles=[];
+  function rng(seed){var s=seed>>>0;return function(){s=(s*1664525+1013904223)>>>0;return s/4294967296;};}
+  function hexToRgb(h){h=h.trim();if(h[0]==='#')h=h.slice(1);
+    return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];}
+  var cs=getComputedStyle(document.documentElement);
+  var GOLD=hexToRgb(cs.getPropertyValue('--acc2')||'#ffb830');
+  var TEAL=hexToRgb(cs.getPropertyValue('--hero')||'#3de8c0');
+  for(var k=0;k<N;k++){
+    var off=document.createElement('canvas');off.width=W>>1;off.height=H>>1;
+    var o=off.getContext('2d'),r=rng(9137+k*761),img=o.createImageData(off.width,off.height),d=img.data;
+    for(var i=0;i<d.length;i+=4){var v=(r()*255)|0;d[i]=v;d[i+1]=v;d[i+2]=v;d[i+3]=255;}
+    o.putImageData(img,0,0);tiles.push(off);
+  }
+  var R2=rng(4242),orbs=[];
+  for(var j=0;j<10;j++){orbs.push({bx:R2()*W,by:R2()*H,r:34+R2()*72,vy:6+R2()*14,
+    A:22+R2()*48,ph:R2()*6.283,sp:.18+R2()*.3,a:.05+R2()*.05,c:j%3?GOLD:TEAL});}
+  window.__broll={
+    duration:function(){return DUR;},
+    seek:function(t){
+      if(!(t>=0))t=0; if(t>DUR)t=DUR;
+      cx.clearRect(0,0,W,H);
+      for(var j=0;j<orbs.length;j++){var b=orbs[j];
+        var y=((b.by-b.vy*t)%1260+1260)%1260-90;
+        var x=b.bx+b.A*Math.sin(b.sp*t+b.ph);
+        var g=cx.createRadialGradient(x,y,0,x,y,b.r);
+        g.addColorStop(0,'rgba('+b.c[0]+','+b.c[1]+','+b.c[2]+','+b.a+')');
+        g.addColorStop(1,'rgba('+b.c[0]+','+b.c[1]+','+b.c[2]+',0)');
+        cx.fillStyle=g;cx.beginPath();cx.arc(x,y,b.r,0,6.283);cx.fill();}
+      var idx=Math.floor(t*FPS)%N;
+      cx.globalAlpha=0.04;
+      cx.drawImage(tiles[idx],0,0,W,H);
+      cx.globalAlpha=1;
+    }
+  };
+  window.__broll.seek(0);
+})();
+</script>
+
+<script type="application/json" id="sfx">
+{"loudness":"low","events":[
+  {"t":7.40,"id":"rise","gain":0.40},
+  {"t":8.20,"id":"slam","gain":0.90},
+  {"t":10.90,"id":"tick","gain":0.35},
+  {"t":16.01,"id":"ding","gain":0.40},
+  {"t":28.72,"id":"whoosh","gain":0.40},
+  {"t":34.01,"id":"boom","gain":0.45},
+  {"t":49.30,"id":"pop","gain":0.45},
+  {"t":55.05,"id":"boom","gain":0.50}
+]}
+</script>
+<script type="application/json" id="ambience">
+{"type":"drone","gain":0.25}
+</script>
+</body>
+</html>
