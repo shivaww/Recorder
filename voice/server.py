@@ -80,11 +80,13 @@ MAX_CHUNK_CHARS = 500
 # truncated: ref_text must stay a transcript of the whole clip.
 MAX_REF_SECONDS = 30
 # Cap runaway generations and reduce sampling randomness.
-GEN_KWARGS = {"max_new_tokens": 2048, "temperature": 0.5}
+GEN_KWARGS = {"max_new_tokens": 2048, "temperature": 0.7}
 # Escape hatch for upstream issue #341 (ICL speaks the reference tail):
 # x-vector-only cloning has no reference-text conditioning to leak from.
 # Flip to True if the per-chunk trim net ever proves insufficient.
 CLONE_X_VECTOR = False
+# TEMPORARY DEBUG: Disable leak trim to verify 'missing first word' bug
+DEBUG_DISABLE_LEAK_TRIM = True
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # bf16 needs compute capability 8.0+. T4 and P100 lack it, and fp16 is unstable
 # for Qwen3-TTS, so those GPUs run fp32.
@@ -595,7 +597,8 @@ def _synthesize_impl(mode, text, language, speaker, instruct, ref_audio, ref_tex
         # Trim the model's own leading/trailing silence so we own the seam.
         wav = _trim_silence(wav, sr)
         # Cut any spoken reference-tail leak (upstream #341) off the head.
-        wav = trim_ref_leak(wav, sr, ref_text)
+        if not DEBUG_DISABLE_LEAK_TRIM:
+            wav = trim_ref_leak(wav, sr, ref_text)
         # Short fade kills clicks at trimmed boundaries.
         wav = _edge_fade(wav, sr, fade_ms=25.0)
         pieces.append(wav)
