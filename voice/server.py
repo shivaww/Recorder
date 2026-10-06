@@ -705,13 +705,13 @@ def generate():
             sf.write(ref_path, data, sr)
         except Exception as e:
             return jsonify(error=f"cannot read reference audio ({e})"), 400
-        # Derive ref_text from the clip itself: a client transcript that runs
-        # past the recorded audio makes the model speak the uncovered tail
-        # ("...easy to follow") into the first generated chunk.
-        asr_text = transcribe_ref(ref_path)
-        if asr_text:
-            print(f"ref_text from ASR ({len(asr_text.split())} words): {asr_text[:80]}")
-            ref_text = asr_text
+        # Derive ref_text from the clip itself — only ICL cloning uses it;
+        # x-vector mode ignores ref_text, so skip the ASR pass entirely there.
+        if not CLONE_X_VECTOR:
+            asr_text = transcribe_ref(ref_path)
+            if asr_text:
+                print(f"ref_text from ASR ({len(asr_text.split())} words): {asr_text[:80]}")
+                ref_text = asr_text
 
     job_id = uuid.uuid4().hex[:12]
     JOBS[job_id] = {"status": "processing", "path": None, "duration": None, "error": None}
