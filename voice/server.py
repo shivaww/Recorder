@@ -55,6 +55,17 @@ except ImportError:
         print("flash-attn skipped")
     from qwen_tts import Qwen3TTSModel
 
+try:
+    from faster_whisper import WhisperModel
+except ImportError:
+    try:
+        print("Installing faster-whisper ...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "faster-whisper"])
+        from faster_whisper import WhisperModel
+    except Exception:
+        print("faster-whisper unavailable: clone ref_text falls back to client transcript")
+        WhisperModel = None
+
 if os.path.isdir("/kaggle/working"):
     OUT_DIR = "/kaggle/working/tts_output"
 elif os.path.isdir("/content"):
@@ -143,6 +154,39 @@ def get_model(mode: str):
         _loaded_dev[mode] = dev
         print(f"{mode} model ready")
     return _loaded[mode]
+
+
+_asr = None
+_asr_lock = threading.Lock()
+
+
+def get_asr():
+    """Tiny Whisper for transcribing clone references; loaded on first use."""
+    global _asr
+    if WhisperModel is None:
+        return None
+    with _asr_lock:
+        if _asr is None:
+            print("Loading whisper-tiny for reference transcription ...")
+            _asr = WhisperModel("tiny",
+                                device="cuda" if DEVICE == "cuda" else "cpu",
+                                compute_type="float16" if DEVICE == "cuda" else "int8")
+        return _asr
+
+
+def transcribe_ref(path: str) -> str:
+    """ASR transcript of the reference clip; '' when ASR is unavailable."""
+    try:
+        asr = get_asr()
+        if asr is None:
+            return ""
+        segments, _info = asr.transcribe(
+            path, language="en", beam_size=1, vad_filter=False,
+            condition_on_previous_text=False)
+        return " ".join(s.text.strip() for s in segments).strip()
+    except Exception as e:
+        print(f"reference ASR failed, falling back to client ref_text: {e}")
+        return ""
 
 
 print("Qwen3-TTS server starting (models load on first use) ...")
@@ -548,9 +592,8 @@ def generate():
         ref_path = os.path.join(OUT_DIR, f"ref_{uuid.uuid4().hex[:8]}.wav")
         request.files["ref_audio"].save(ref_path)
         # Normalize the reference: decode via soundfile, force mono, rewrite as
-        # WAV. Never cut it: ref_text transcribes the WHOLE clip, and a clip
-        # chopped mid-sentence no longer matches it, so the model speaks the
-        # leftover reference words in the output.
+        # WAV. Never cut it: the transcript is derived from the whole clip
+        # below, and a chopped clip would transcribe chopped speech.
         try:
             try:
                 data, sr = sf.read(ref_path, always_2d=True)
@@ -571,10 +614,17 @@ def generate():
                 data = ref_t.numpy().T
                 sr = 24000
             if len(data) > int(sr * MAX_REF_SECONDS):
-                return jsonify(error=f"reference audio is longer than {MAX_REF_SECONDS}s: trim the clip and its ref_text together"), 400
+                return jsonify(error=f"reference audio is longer than {MAX_REF_SECONDS}s: trim the clip and record again"), 400
             sf.write(ref_path, data, sr)
         except Exception as e:
             return jsonify(error=f"cannot read reference audio ({e})"), 400
+        # Derive ref_text from the clip itself: a client transcript that runs
+        # past the recorded audio makes the model speak the uncovered tail
+        # ("...easy to follow") into the first generated chunk.
+        asr_text = transcribe_ref(ref_path)
+        if asr_text:
+            print(f"ref_text from ASR ({len(asr_text.split())} words): {asr_text[:80]}")
+            ref_text = asr_text
 
     job_id = uuid.uuid4().hex[:12]
     JOBS[job_id] = {"status": "processing", "path": None, "duration": None, "error": None}
