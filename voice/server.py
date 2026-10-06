@@ -79,14 +79,17 @@ MAX_CHUNK_CHARS = 500
 # Longest reference clip accepted for cloning, in seconds. Clips are never
 # truncated: ref_text must stay a transcript of the whole clip.
 MAX_REF_SECONDS = 30
-# Cap runaway generations and reduce sampling randomness.
-GEN_KWARGS = {"max_new_tokens": 2048, "temperature": 0.7}
+# Sampling preset for x-vector cloning: balanced prosody without instability.
+# Temperature is variation, not an emotion slider; emotion comes from text.
+GEN_KWARGS = {"max_new_tokens": 2048, "temperature": 0.85, "top_p": 0.95,
+              "top_k": 50, "repetition_penalty": 1.05}
 # Escape hatch for upstream issue #341 (ICL speaks the reference tail):
 # x-vector-only cloning has no reference-text conditioning to leak from.
 # Flip to True if the per-chunk trim net ever proves insufficient.
-CLONE_X_VECTOR = False
-# TEMPORARY DEBUG: Disable leak trim to verify 'missing first word' bug
-DEBUG_DISABLE_LEAK_TRIM = True
+# FIX FOR UPSTREAM #341: Use x-vector only to prevent reference-tail leakage.
+# This mode ignores ref_text conditioning, stopping "Easy to follow" leaks.
+CLONE_X_VECTOR = True
+# DEBUG_DISABLE_LEAK_TRIM is now irrelevant as leak source is blocked upstream.
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # bf16 needs compute capability 8.0+. T4 and P100 lack it, and fp16 is unstable
 # for Qwen3-TTS, so those GPUs run fp32.
@@ -436,25 +439,26 @@ def generate_one(model, mode, text, language, speaker, instruct, ref_audio, ref_
             raise ValueError("ref_audio is required for clone mode")
         if not CLONE_X_VECTOR and (not ref_text or not ref_text.strip()):
             raise ValueError("ref_text is required for clone mode")
+        kwargs = {
+            "text": text,
+            "language": language,
+            "ref_audio": ref_audio,
+            **GEN_KWARGS,
+        }
         if CLONE_X_VECTOR:
             # Speaker embedding only: no ICL reference-text conditioning,
             # therefore no reference-tail leakage path at all.
-            wavs, sr = model.generate_voice_clone(
-                text=text,
-                language=language,
-                ref_audio=ref_audio,
-                ref_text=None,
-                x_vector_only_mode=True,
-                **GEN_KWARGS,
-            )
+            kwargs["ref_text"] = None
+            kwargs["x_vector_only_mode"] = True
         else:
-            wavs, sr = model.generate_voice_clone(
-                text=text,
-                language=language,
-                ref_audio=ref_audio,
-                ref_text=ref_text.strip(),
-                **GEN_KWARGS,
-            )
+            kwargs["ref_text"] = ref_text.strip()
+        try:
+            wavs, sr = model.generate_voice_clone(**kwargs)
+        except TypeError:
+            # qwen-tts build without the newer sampling kwargs: retry lean.
+            for key in ("top_p", "top_k", "repetition_penalty"):
+                kwargs.pop(key, None)
+            wavs, sr = model.generate_voice_clone(**kwargs)
 
     elif mode == "design":
         if not design_prompt or not design_prompt.strip():
@@ -596,9 +600,9 @@ def _synthesize_impl(mode, text, language, speaker, instruct, ref_audio, ref_tex
         )
         # Trim the model's own leading/trailing silence so we own the seam.
         wav = _trim_silence(wav, sr)
-        # Cut any spoken reference-tail leak (upstream #341) off the head.
-        if not DEBUG_DISABLE_LEAK_TRIM:
-            wav = trim_ref_leak(wav, sr, ref_text)
+        # Leak trim net retired: x-vector-only cloning removes the ICL
+        # reference-text path that leaked (#341), and the trimmer's word
+        # timestamp cuts ate legitimate first words of the target.
         # Short fade kills clicks at trimmed boundaries.
         wav = _edge_fade(wav, sr, fade_ms=25.0)
         pieces.append(wav)
