@@ -81,6 +81,10 @@ MAX_CHUNK_CHARS = 500
 MAX_REF_SECONDS = 30
 # Cap runaway generations and reduce sampling randomness.
 GEN_KWARGS = {"max_new_tokens": 2048, "temperature": 0.5}
+# Escape hatch for upstream issue #341 (ICL speaks the reference tail):
+# x-vector-only cloning has no reference-text conditioning to leak from.
+# Flip to True if the per-chunk trim net ever proves insufficient.
+CLONE_X_VECTOR = False
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # bf16 needs compute capability 8.0+. T4 and P100 lack it, and fp16 is unstable
 # for Qwen3-TTS, so those GPUs run fp32.
@@ -180,9 +184,19 @@ def transcribe_ref(path: str) -> str:
         asr = get_asr()
         if asr is None:
             return ""
+        # VAD skips pre-roll silence; hallucination_silence_threshold drops
+        # silent stretches whisper would otherwise fill with invented words.
         segments, _info = asr.transcribe(
-            path, language="en", beam_size=1, vad_filter=False,
-            condition_on_previous_text=False)
+            path, language="en", beam_size=1, vad_filter=True,
+            vad_parameters={
+                "threshold": 0.5,
+                "neg_threshold": 0.35,
+                "min_speech_duration_ms": 100,
+                "min_silence_duration_ms": 300,
+                "speech_pad_ms": 50,
+            },
+            condition_on_previous_text=False,
+            hallucination_silence_threshold=0.5)
         return " ".join(s.text.strip() for s in segments).strip()
     except Exception as e:
         print(f"reference ASR failed, falling back to client ref_text: {e}")
@@ -418,15 +432,27 @@ def generate_one(model, mode, text, language, speaker, instruct, ref_audio, ref_
     elif mode == "clone":
         if not ref_audio or not os.path.isfile(ref_audio):
             raise ValueError("ref_audio is required for clone mode")
-        if not ref_text or not ref_text.strip():
+        if not CLONE_X_VECTOR and (not ref_text or not ref_text.strip()):
             raise ValueError("ref_text is required for clone mode")
-        wavs, sr = model.generate_voice_clone(
-            text=text,
-            language=language,
-            ref_audio=ref_audio,
-            ref_text=ref_text.strip(),
-            **GEN_KWARGS,
-        )
+        if CLONE_X_VECTOR:
+            # Speaker embedding only: no ICL reference-text conditioning,
+            # therefore no reference-tail leakage path at all.
+            wavs, sr = model.generate_voice_clone(
+                text=text,
+                language=language,
+                ref_audio=ref_audio,
+                ref_text=None,
+                x_vector_only_mode=True,
+                **GEN_KWARGS,
+            )
+        else:
+            wavs, sr = model.generate_voice_clone(
+                text=text,
+                language=language,
+                ref_audio=ref_audio,
+                ref_text=ref_text.strip(),
+                **GEN_KWARGS,
+            )
 
     elif mode == "design":
         if not design_prompt or not design_prompt.strip():
@@ -443,6 +469,58 @@ def generate_one(model, mode, text, language, speaker, instruct, ref_audio, ref_
 
     audio = torch.from_numpy(wavs[0]).float()
     return audio, sr
+
+
+_LEAK_MAX_WORDS = 8
+_LEAK_PROBE_SECONDS = 3.0
+
+
+def _norm_words(s):
+    return re.sub(r"[^a-z0-9 ]", " ", (s or "").lower()).split()
+
+
+def trim_ref_leak(audio, sr, ref_text):
+    """Cut a spoken reference-tail leak off the head of a generated chunk.
+
+    Qwen3-TTS ICL cloning can continue the reference content before speaking
+    the target (upstream issue #341, still unfixed): the output opens with the
+    last words of the reference transcript. Detect it by ASR-ing the first few
+    seconds of the chunk with word timestamps and matching that head against
+    the tail words of ref_text; cut at the end of the matched run.
+    """
+    asr = get_asr()
+    if asr is None or not ref_text or audio.numel() < int(sr * 0.5):
+        return audio
+    tail = _norm_words(ref_text)
+    if len(tail) < 2:
+        return audio
+    probe = audio[: int(sr * _LEAK_PROBE_SECONDS)]
+    try:
+        segments, _info = asr.transcribe(
+            probe.cpu().numpy().astype(np.float32), language="en", beam_size=1,
+            vad_filter=False, condition_on_previous_text=False,
+            word_timestamps=True)
+        head, ends = [], []
+        for seg in segments:
+            for w in (seg.words or []):
+                toks = _norm_words(w.word)
+                head.extend(toks)
+                ends.extend([w.end] * len(toks))
+    except Exception as e:
+        print(f"leak probe failed, keeping chunk head: {e}")
+        return audio
+    cut_k = 0
+    for k in range(min(_LEAK_MAX_WORDS, len(tail)), 1, -1):
+        if head[:k] == tail[-k:]:
+            cut_k = k
+            break
+    if not cut_k or cut_k >= len(ends):
+        return audio
+    cut = int(ends[cut_k - 1] * sr) + int(0.06 * sr)
+    if cut >= audio.numel():
+        return audio
+    print(f"trimmed {cut_k}-word reference leak ({cut / sr:.2f}s) from chunk head")
+    return audio[cut:]
 
 
 def _trim_silence(audio, sr, thresh_db=-45.0, margin_ms=30.0):
@@ -516,6 +594,8 @@ def _synthesize_impl(mode, text, language, speaker, instruct, ref_audio, ref_tex
         )
         # Trim the model's own leading/trailing silence so we own the seam.
         wav = _trim_silence(wav, sr)
+        # Cut any spoken reference-tail leak (upstream #341) off the head.
+        wav = trim_ref_leak(wav, sr, ref_text)
         # Short fade kills clicks at trimmed boundaries.
         wav = _edge_fade(wav, sr, fade_ms=25.0)
         pieces.append(wav)
