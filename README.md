@@ -1,6 +1,6 @@
 # Nexon Studio
 
-Pocket production studio: HTML motion clips -> pixel-exact 16:9 and 9:16 MP4s, and scripts -> Qwen3-TTS voice audio. Renders on this phone or on a Kaggle GPU farm. Zero third-party code; no screen capture, no ffmpeg.
+Pocket production studio: HTML motion clips -> pixel-exact 16:9 and 9:16 MP4s, and scripts -> voice audio (Qwen3-TTS or Breeze2-TTS). Renders on this phone or on a Kaggle GPU farm. Zero third-party code; no screen capture, no ffmpeg.
 
 ## Design
 
@@ -58,3 +58,13 @@ In-app voice generation on a Kaggle GPU notebook — same one-command pattern as
 5. The finished WAV lands in `Music/NexonStudio/` with play/share buttons.
 
 Server files live in `qwen3tts/` (`run.sh` one-command launcher + `server.py`); Qwen3-TTS models lazy-load per mode on first request. Re-running the cell is safe: it kills the old server/tunnel and starts fresh.
+
+## Voice engine 2 — Breeze2-TTS (`breeze2tts/`)
+
+A second TTS engine: BreezeBlue/breeze-tts-2 via breezeblue-ai/breeze-tts — top-ranked open-weights TTS on the Artificial Analysis voice arena (EN + ZH, ~3B, eager attention, ~7.7 GiB VRAM: fits one T4, which runs its hard-coded bf16 via emulation — dtype fallback documented in `run.sh`). Same one-command Kaggle pattern, same job-queue API, its own port (5001 — never clashes with a qwen server on 5000):
+
+    !rm -rf /kaggle/working/V && git clone --depth 1 https://github.com/shivaww/Recorder.git /kaggle/working/V && cd /kaggle/working/V/breeze2tts && bash run.sh
+
+Modes: **custom** (plain text; optional natural-language instruct — Breeze has no preset speakers, so `speaker` is ignored), **clone** (reference audio + its exact transcript, mandatory), **design** (describe the voice in natural language), **direction** (clone + delivery instruction). Inline emotional tags — `(sigh)`, `(laugh)`, `[笑]` — are interpreted in the text itself. Output: mono 24 kHz WAV. Note: model weights carry a research/non-commercial license (code is Apache-2.0).
+
+App-side engine selection is pending; until then the server is directly testable — same endpoints and form fields as the qwen server (`/health`, `/generate`, `/status/<id>`, `/download/<id>`), so the existing client contract works unchanged.
