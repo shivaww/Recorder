@@ -418,7 +418,37 @@ def chunk_text(text: str, max_chars: int = MAX_CHUNK_CHARS):
     return chunks or [text]
 
 
-def generate_one(model, mode, text, language, speaker, instruct, ref_audio, ref_text, design_prompt, speed=1.0):
+def _seed_everything(seed: int):
+    """Reproducibility only (upstream evidence: seeds do NOT anchor voice)."""
+    import random as _random
+    _random.seed(seed)
+    np.random.seed(seed % (2 ** 32))
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def _make_clone_prompt(model, ref_audio, ref_text):
+    """One reusable voice-clone prompt per job (upstream-recommended anchor).
+
+    Returns None when the installed qwen-tts has no
+    create_voice_clone_prompt (older builds); generate_one then keeps the
+    per-call reference path.
+    """
+    try:
+        prompt = model.create_voice_clone_prompt(
+            ref_audio=ref_audio,
+            ref_text=(ref_text or None),
+            x_vector_only_mode=CLONE_X_VECTOR,
+        )
+        print("voice clone prompt ready (reused across all chunks)")
+        return prompt
+    except (AttributeError, TypeError) as e:
+        print(f"create_voice_clone_prompt unavailable, per-call cloning: {e}")
+        return None
+
+
+def generate_one(model, mode, text, language, speaker, instruct, ref_audio, ref_text, design_prompt, speed=1.0, clone_prompt=None):
     language = language or "Auto"
 
     if mode == "custom":
@@ -439,6 +469,25 @@ def generate_one(model, mode, text, language, speaker, instruct, ref_audio, ref_
             raise ValueError("ref_audio is required for clone mode")
         if not CLONE_X_VECTOR and (not ref_text or not ref_text.strip()):
             raise ValueError("ref_text is required for clone mode")
+        if clone_prompt is not None:
+            # Evidence-based consistency path (upstream #239/#220): one
+            # reusable voice-clone prompt anchors the speaker across all
+            # chunks, and non_streaming_mode stops the measured
+            # articulation-rate acceleration inside long chunks.
+            kwargs = {
+                "text": text,
+                "language": language,
+                "voice_clone_prompt": clone_prompt,
+                "non_streaming_mode": True,
+                **GEN_KWARGS,
+            }
+            try:
+                wavs, sr = model.generate_voice_clone(**kwargs)
+                return torch.from_numpy(wavs[0]).float(), sr
+            except TypeError:
+                # Installed qwen-tts without prompt / non-streaming kwargs:
+                # fall through to the per-call reference path below.
+                print("voice_clone_prompt path unsupported; per-call reference")
         kwargs = {
             "text": text,
             "language": language,
@@ -590,13 +639,22 @@ def _synthesize_impl(mode, text, language, speaker, instruct, ref_audio, ref_tex
     vo_text = extract_vo(text)
     chunks = chunk_text(vo_text)
 
+    # Clone jobs build ONE reusable voice-clone prompt (upstream-recommended
+    # identity anchor, reused by every chunk); per-chunk seeds make reruns
+    # comparable. Seeds do NOT anchor the voice - the prompt does.
+    clone_prompt = None
+    if (mode or "").lower() == "clone" and ref_audio and os.path.isfile(ref_audio):
+        clone_prompt = _make_clone_prompt(model, ref_audio, ref_text)
+
     pieces = []
     sr = 24000
     for i, chunk in enumerate(chunks):
         print(f"[{job_id}] {mode} chunk {i+1}/{len(chunks)}: {chunk[:55]}...")
+        _seed_everything(i)
         wav, sr = generate_one(
             model, mode, chunk, language, speaker, instruct,
-            ref_audio, ref_text, design_prompt, speed
+            ref_audio, ref_text, design_prompt, speed,
+            clone_prompt=clone_prompt
         )
         # Trim the model's own leading/trailing silence so we own the seam.
         wav = _trim_silence(wav, sr)
