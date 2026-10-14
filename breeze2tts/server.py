@@ -24,6 +24,7 @@ import uuid
 import subprocess
 import tempfile
 import threading
+from pathlib import Path
 
 try:
     sys.stdout.reconfigure(line_buffering=True, write_through=True)
@@ -120,7 +121,7 @@ def get_runtime():
                 sys.exit("FATAL: checkpoint dir not found: %s" % BREEZE_CKPT)
             print("Loading Breeze2 checkpoint on %s (eager attention) ..." % DEVICE)
             tokenizer, model, audio_tokenizer = load_runtime(
-                BREEZE_CKPT, device=DEVICE, attn_implementation="eager"
+                Path(BREEZE_CKPT), device=DEVICE, attn_implementation="eager"
             )
             update_generation_config_for_breeze(model)
             config = FastStreamingConfig(
