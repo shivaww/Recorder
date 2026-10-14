@@ -75,9 +75,6 @@ else:
 os.makedirs(OUT_DIR, exist_ok=True)
 
 VO_MARKER = "{here complete voice over}"
-# A/B tested: 500-char chunks keep the voice anchored and prosody
-# alive (1200-char takes drift and read flat). Boundaries come from
-# explicit <chunkN> tags, else paragraphs; never mid-sentence.
 MAX_CHUNK_CHARS = 500
 # Longest reference clip accepted for cloning, in seconds. Clips are never
 # truncated: ref_text must stay a transcript of the whole clip.
@@ -215,9 +212,6 @@ print("Qwen3-TTS server starting (models load on first use) ...")
 
 # ------------------------------------------------------------- helpers ---
 SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
-PARA_SPLIT = re.compile(r"\n\s*\n")  # blank line = topic boundary
-# Explicit user chunk tags: <chunk1> ... </chunk1> (any label after chunk).
-CHUNK_TAG = re.compile(r"<\s*/?\s*chunk[^>]*>", re.IGNORECASE)
 
 
 def extract_vo(text: str) -> str:
@@ -408,45 +402,20 @@ def _split_long(s: str, max_chars: int):
     return out
 
 
-def _tag_blocks(text: str):
-    """User-marked <chunkN>...</chunkN> runs with the tags stripped.
-
-    Returns None when the script has no tags (caller falls back to
-    paragraphs). Untagged runs around/between tags are kept as their own
-    blocks so no text is ever dropped.
-    """
-    if not CHUNK_TAG.search(text):
-        return None
-    return [p for p in CHUNK_TAG.split(text) if p.strip()]
-
-
 def chunk_text(text: str, max_chars: int = MAX_CHUNK_CHARS):
-    # Chunking (A/B tested): 500-char chunks keep the voice anchored and
-    # prosody alive; long takes drift and read flat. Boundaries come from
-    # explicit <chunkN> tags when present, else blank-line paragraphs;
-    # sentences pack within a block, and a block's final chunk is flagged
-    # for a topic pause. Returns (chunk, ends_paragraph) pairs.
-    blocks = _tag_blocks(text)
-    if blocks is None:
-        blocks = [p for p in PARA_SPLIT.split(text) if p.strip()] or [text]
-    chunks = []
-    for blk in blocks:
-        ptext = normalize_text(blk)
-        sentences = [x for s in SENT_SPLIT.split(ptext) if s for x in _split_long(s, max_chars)]
-        cur = ""
-        for s in sentences:
-            if len(cur) + len(s) + 1 <= max_chars:
-                cur = f"{cur} {s}".strip()
-            else:
-                if cur:
-                    chunks.append((cur, False))
-                cur = s
-        if cur:
-            chunks.append((cur, False))
-        if chunks:
-            last_c, _ = chunks[-1]
-            chunks[-1] = (last_c, True)
-    return chunks or [(normalize_text(text), True)]
+    text = normalize_text(text)
+    sentences = [x for s in SENT_SPLIT.split(text) if s for x in _split_long(s, max_chars)]
+    chunks, cur = [], ""
+    for s in sentences:
+        if len(cur) + len(s) + 1 <= max_chars:
+            cur = f"{cur} {s}".strip()
+        else:
+            if cur:
+                chunks.append(cur)
+            cur = s
+    if cur:
+        chunks.append(cur)
+    return chunks or [text]
 
 
 def generate_one(model, mode, text, language, speaker, instruct, ref_audio, ref_text, design_prompt, speed=1.0):
@@ -586,12 +555,10 @@ def _edge_fade(audio, sr, fade_ms=25.0):
     return out
 
 
-def _pause_for(chunk_text, sr, default_ms=150.0, para_end=False):
+def _pause_for(chunk_text, sr, default_ms=150.0):
     """Inter-chunk pause length driven by the chunk's final punctuation."""
     t = (chunk_text or "").rstrip()
-    if para_end:
-        ms = 550.0          # topic shift: tagged-chunk or paragraph end
-    elif t and t[-1] in ".!?\u2026":
+    if t and t[-1] in ".!?\u2026":
         ms = 350.0
     elif t and t[-1] in ",;:":
         ms = 180.0
@@ -609,25 +576,6 @@ def _dev_lock(dev: str):
         return _dev_locks.setdefault(dev, threading.RLock())
 
 
-def _speech_rms(audio):
-    """RMS of a 1-D speech tensor; None for empty audio."""
-    if audio.numel() == 0:
-        return None
-    return float(torch.sqrt(torch.mean(audio.double() ** 2)))
-
-
-def _match_rms(wav, ref_rms, max_gain_db=10.0):
-    """Gain-match a chunk to ref_rms (the first chunk's speech level)."""
-    r = _speech_rms(wav)
-    if r is None or ref_rms is None or r <= 0.0:
-        return wav
-    cap = 10 ** (max_gain_db / 20.0)
-    gain = min(max(ref_rms / r, 1.0 / cap), cap)
-    if abs(gain - 1.0) < 1e-3:
-        return wav
-    return (wav * gain).clamp(-1.0, 1.0)
-
-
 def synthesize(mode, text, language, speaker, instruct, ref_audio, ref_text, design_prompt, job_id, speed=1.0, loudness=1.0):
     """Serialize jobs per GPU so loads and evictions never overlap a running job."""
     m = (mode or "custom").lower().strip()
@@ -643,9 +591,8 @@ def _synthesize_impl(mode, text, language, speaker, instruct, ref_audio, ref_tex
     chunks = chunk_text(vo_text)
 
     pieces = []
-    ref_rms = None
     sr = 24000
-    for i, (chunk, para_end) in enumerate(chunks):
+    for i, chunk in enumerate(chunks):
         print(f"[{job_id}] {mode} chunk {i+1}/{len(chunks)}: {chunk[:55]}...")
         wav, sr = generate_one(
             model, mode, chunk, language, speaker, instruct,
@@ -653,12 +600,6 @@ def _synthesize_impl(mode, text, language, speaker, instruct, ref_audio, ref_tex
         )
         # Trim the model's own leading/trailing silence so we own the seam.
         wav = _trim_silence(wav, sr)
-        # Loudness continuity: match every later chunk to the first chunk's
-        # speech RMS so a long script stays at one level end to end.
-        if i == 0:
-            ref_rms = _speech_rms(wav)
-        else:
-            wav = _match_rms(wav, ref_rms)
         # Leak trim net retired: x-vector-only cloning removes the ICL
         # reference-text path that leaked (#341), and the trimmer's word
         # timestamp cuts ate legitimate first words of the target.
@@ -666,7 +607,7 @@ def _synthesize_impl(mode, text, language, speaker, instruct, ref_audio, ref_tex
         wav = _edge_fade(wav, sr, fade_ms=25.0)
         pieces.append(wav)
         if i < len(chunks) - 1:
-            pause = _pause_for(chunk, sr, para_end=para_end)
+            pause = _pause_for(chunk, sr)
             if pause > 0:
                 pieces.append(torch.zeros(pause, dtype=wav.dtype))
 
