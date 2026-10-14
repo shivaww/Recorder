@@ -169,6 +169,9 @@ def generate_breeze(text, instruction, ref_path, ref_text, cfg_scale, seed, job_
 
 # -------------------------------------------------------------- helpers ---
 SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
+PARA_SPLIT = re.compile(r"\n\s*\n")  # blank line = topic boundary
+# Explicit user chunk tags: <chunk1> ... </chunk1> (any label after chunk).
+CHUNK_TAG = re.compile(r"<\s*/?\s*chunk[^>]*>", re.IGNORECASE)
 
 
 def extract_vo(text):
@@ -178,37 +181,58 @@ def extract_vo(text):
     return " ".join(p.strip() for p in parts[1:] if p.strip())
 
 
-def chunk_text(text, limit=MAX_CHUNK_CHARS):
-    """Split on sentence ends and pack sentences up to `limit` chars.
+def _tag_blocks(text):
+    """User-marked <chunkN>...</chunkN> runs with the tags stripped.
 
-    A single sentence longer than the limit is hard-split on commas, then
-    spaces, so a runaway paragraph can never exceed the context budget.
+    Returns None when the script has no tags (caller falls back to
+    paragraphs). Untagged runs around/between tags are kept as their own
+    blocks so no text is ever dropped.
     """
-    sents = [s.strip() for s in SENT_SPLIT.split(text) if s.strip()]
+    if not CHUNK_TAG.search(text):
+        return None
+    return [p for p in CHUNK_TAG.split(text) if p.strip()]
+
+
+def chunk_text(text, limit=MAX_CHUNK_CHARS):
+    """Tag/paragraph-aware chunking.
+
+    Explicit <chunkN> tags (or blank-line paragraphs when untagged) define
+    blocks; sentences pack within a block up to `limit` chars; the last
+    chunk of each block is flagged for a topic pause. A single sentence
+    longer than the limit is hard-split on commas, then spaces.
+    """
+    blocks = _tag_blocks(text)
+    if blocks is None:
+        blocks = [p for p in PARA_SPLIT.split(text) if p.strip()] or [text]
     chunks = []
-    cur = ""
-    for s in sents:
-        while len(s) > limit:
-            if cur:
-                chunks.append(cur)
-                cur = ""
-            cut = s.rfind(",", 0, limit)
-            if cut < limit // 2:
-                cut = s.rfind(" ", 0, limit)
-            if cut < limit // 2:
-                cut = limit
-            chunks.append(s[:cut].strip())
-            s = s[cut:].lstrip()
-        if not s:
-            continue
-        if cur and len(cur) + 1 + len(s) <= limit:
-            cur = cur + " " + s
-        else:
-            if cur:
-                chunks.append(cur)
-            cur = s
-    if cur:
-        chunks.append(cur)
+    for blk in blocks:
+        sents = [s.strip() for s in SENT_SPLIT.split(blk) if s.strip()]
+        cur = ""
+        for s in sents:
+            while len(s) > limit:
+                if cur:
+                    chunks.append((cur, False))
+                    cur = ""
+                cut = s.rfind(",", 0, limit)
+                if cut < limit // 2:
+                    cut = s.rfind(" ", 0, limit)
+                if cut < limit // 2:
+                    cut = limit
+                chunks.append((s[:cut].strip(), False))
+                s = s[cut:].lstrip()
+            if not s:
+                continue
+            if cur and len(cur) + 1 + len(s) <= limit:
+                cur = cur + " " + s
+            else:
+                if cur:
+                    chunks.append((cur, False))
+                cur = s
+        if cur:
+            chunks.append((cur, False))
+        if chunks:
+            last_c, _ = chunks[-1]
+            chunks[-1] = (last_c, True)
     return chunks
 
 
@@ -241,8 +265,10 @@ def _edge_fade(audio, sr, fade_ms=25.0):
     return out
 
 
-def _pause_for(chunk, sr, default_ms=150.0):
-    """Pause after a chunk, chosen by its final punctuation."""
+def _pause_for(chunk, sr, default_ms=150.0, para_end=False):
+    """Pause after a chunk; block ends get a topic-shift pause."""
+    if para_end:
+        return int(sr * 0.55)
     tail = chunk.rstrip()
     if not tail:
         return int(sr * default_ms / 1000.0)
@@ -285,7 +311,7 @@ def synthesize(mode, text, instruction, ref_path, ref_text, cfg_scale, seed, job
         pieces = []
         ref_rms = None
         sr = REF_SR
-        for i, chunk in enumerate(chunks):
+        for i, (chunk, para_end) in enumerate(chunks):
             print("[%s] %s chunk %d/%d: %s..." % (job_id, mode, i + 1, len(chunks), chunk[:55]))
             wav, sr = generate_breeze(
                 chunk, instruction, ref_path, ref_text, cfg_scale, seed, job_id
@@ -300,7 +326,7 @@ def synthesize(mode, text, instruction, ref_path, ref_text, cfg_scale, seed, job
             wav = _edge_fade(wav, sr)
             pieces.append(wav)
             if i < len(chunks) - 1:
-                pause = _pause_for(chunk, sr)
+                pause = _pause_for(chunk, sr, para_end=para_end)
                 if pause > 0:
                     pieces.append(np.zeros(pause, dtype=np.float32))
         full = np.concatenate(pieces) if pieces else np.zeros(0, dtype=np.float32)

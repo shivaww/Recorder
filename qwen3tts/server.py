@@ -75,9 +75,10 @@ else:
 os.makedirs(OUT_DIR, exist_ok=True)
 
 VO_MARKER = "{here complete voice over}"
-# Chunk length bounds seam count: every seam re-samples delivery and
-# level. 1200 chars ~= 80 s of speech; the 2048-token cap allows ~170 s.
-MAX_CHUNK_CHARS = 1200
+# A/B tested: 500-char chunks keep the voice anchored and prosody
+# alive (1200-char takes drift and read flat). Boundaries come from
+# explicit <chunkN> tags, else paragraphs; never mid-sentence.
+MAX_CHUNK_CHARS = 500
 # Longest reference clip accepted for cloning, in seconds. Clips are never
 # truncated: ref_text must stay a transcript of the whole clip.
 MAX_REF_SECONDS = 30
@@ -214,6 +215,9 @@ print("Qwen3-TTS server starting (models load on first use) ...")
 
 # ------------------------------------------------------------- helpers ---
 SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
+PARA_SPLIT = re.compile(r"\n\s*\n")  # blank line = topic boundary
+# Explicit user chunk tags: <chunk1> ... </chunk1> (any label after chunk).
+CHUNK_TAG = re.compile(r"<\s*/?\s*chunk[^>]*>", re.IGNORECASE)
 
 
 def extract_vo(text: str) -> str:
@@ -404,20 +408,45 @@ def _split_long(s: str, max_chars: int):
     return out
 
 
+def _tag_blocks(text: str):
+    """User-marked <chunkN>...</chunkN> runs with the tags stripped.
+
+    Returns None when the script has no tags (caller falls back to
+    paragraphs). Untagged runs around/between tags are kept as their own
+    blocks so no text is ever dropped.
+    """
+    if not CHUNK_TAG.search(text):
+        return None
+    return [p for p in CHUNK_TAG.split(text) if p.strip()]
+
+
 def chunk_text(text: str, max_chars: int = MAX_CHUNK_CHARS):
-    text = normalize_text(text)
-    sentences = [x for s in SENT_SPLIT.split(text) if s for x in _split_long(s, max_chars)]
-    chunks, cur = [], ""
-    for s in sentences:
-        if len(cur) + len(s) + 1 <= max_chars:
-            cur = f"{cur} {s}".strip()
-        else:
-            if cur:
-                chunks.append(cur)
-            cur = s
-    if cur:
-        chunks.append(cur)
-    return chunks or [text]
+    # Chunking (A/B tested): 500-char chunks keep the voice anchored and
+    # prosody alive; long takes drift and read flat. Boundaries come from
+    # explicit <chunkN> tags when present, else blank-line paragraphs;
+    # sentences pack within a block, and a block's final chunk is flagged
+    # for a topic pause. Returns (chunk, ends_paragraph) pairs.
+    blocks = _tag_blocks(text)
+    if blocks is None:
+        blocks = [p for p in PARA_SPLIT.split(text) if p.strip()] or [text]
+    chunks = []
+    for blk in blocks:
+        ptext = normalize_text(blk)
+        sentences = [x for s in SENT_SPLIT.split(ptext) if s for x in _split_long(s, max_chars)]
+        cur = ""
+        for s in sentences:
+            if len(cur) + len(s) + 1 <= max_chars:
+                cur = f"{cur} {s}".strip()
+            else:
+                if cur:
+                    chunks.append((cur, False))
+                cur = s
+        if cur:
+            chunks.append((cur, False))
+        if chunks:
+            last_c, _ = chunks[-1]
+            chunks[-1] = (last_c, True)
+    return chunks or [(normalize_text(text), True)]
 
 
 def generate_one(model, mode, text, language, speaker, instruct, ref_audio, ref_text, design_prompt, speed=1.0):
@@ -557,10 +586,12 @@ def _edge_fade(audio, sr, fade_ms=25.0):
     return out
 
 
-def _pause_for(chunk_text, sr, default_ms=150.0):
+def _pause_for(chunk_text, sr, default_ms=150.0, para_end=False):
     """Inter-chunk pause length driven by the chunk's final punctuation."""
     t = (chunk_text or "").rstrip()
-    if t and t[-1] in ".!?\u2026":
+    if para_end:
+        ms = 550.0          # topic shift: tagged-chunk or paragraph end
+    elif t and t[-1] in ".!?\u2026":
         ms = 350.0
     elif t and t[-1] in ",;:":
         ms = 180.0
@@ -614,7 +645,7 @@ def _synthesize_impl(mode, text, language, speaker, instruct, ref_audio, ref_tex
     pieces = []
     ref_rms = None
     sr = 24000
-    for i, chunk in enumerate(chunks):
+    for i, (chunk, para_end) in enumerate(chunks):
         print(f"[{job_id}] {mode} chunk {i+1}/{len(chunks)}: {chunk[:55]}...")
         wav, sr = generate_one(
             model, mode, chunk, language, speaker, instruct,
@@ -635,7 +666,7 @@ def _synthesize_impl(mode, text, language, speaker, instruct, ref_audio, ref_tex
         wav = _edge_fade(wav, sr, fade_ms=25.0)
         pieces.append(wav)
         if i < len(chunks) - 1:
-            pause = _pause_for(chunk, sr)
+            pause = _pause_for(chunk, sr, para_end=para_end)
             if pause > 0:
                 pieces.append(torch.zeros(pause, dtype=wav.dtype))
 
