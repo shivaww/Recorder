@@ -67,6 +67,19 @@ if command -v ffmpeg >/dev/null 2>&1; then
 else
   note "WARNING: ffmpeg install failed - only WAV/FLAC/OGG voice samples will work"
 fi
+# Upstream breeze requirements pull the sox PYTHON package, which needs the
+# sox binary for reference-audio processing - without it the pipeline fails
+# oddly (str/str TypeError downstream of a silent sox failure).
+if ! command -v sox >/dev/null 2>&1; then
+  note "sox missing - installing (upstream ref-audio pipeline uses it)"
+  apt-get update -qq >/dev/null 2>&1
+  apt-get install -y -qq sox >/dev/null 2>&1
+fi
+if command -v sox >/dev/null 2>&1; then
+  note "sox ready"
+else
+  note "WARNING: sox install failed - reference audio processing may fail"
+fi
 if python -c "import torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)"; then
   note "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n 1)"
 else

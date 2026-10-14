@@ -414,6 +414,8 @@ def generate():
             JOBS[job_id].update(status="done", path=path, duration=round(duration, 2))
             print("[%s] done (%.1fs)" % (job_id, duration))
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             JOBS[job_id].update(status="error", error=str(e))
             print("[%s] failed: %s" % (job_id, e))
 
