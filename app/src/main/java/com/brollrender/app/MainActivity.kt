@@ -224,12 +224,14 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
-    private fun showScreen(v: View) {
+    @Volatile private var onRemoteJobsScreen = false
+
+    private fun showScreen(v: View, isRemoteJobs: Boolean = false) {
+        onRemoteJobsScreen = isRemoteJobs
         // Do NOT call root.removeAllViews(): the renderer's ghost-visible
         // WebView is a sibling beneath this UI. Removing it detaches
         // Chromium from the window, which prevents compositor commits and
-        // makes GPU capture return stale/blank frames (or time out waiting
-        // for postVisualStateCallback).
+        // makes GPU capture return stale/blank frames.
         currentScreen?.let { root.removeView(it) }
         root.addView(
             v,
@@ -262,7 +264,7 @@ class MainActivity : Activity() {
             textSize = sizeSp.toFloat()
             setTextColor(color)
             typeface = Console.display()
-            letterSpacing = 0.05f
+            letterSpacing = 0.04f
         }
 
     /** BODY role: helper sentences, empty states, guidance. */
@@ -272,27 +274,77 @@ class MainActivity : Activity() {
             textSize = sizeSp.toFloat()
             setTextColor(color)
             typeface = Console.body()
-            setLineSpacing(0f, 1.15f)
+            setLineSpacing(0f, 1.2f)
         }
 
-    private fun styleButton(b: Button, filled: Boolean, danger: Boolean = false) {
-        b.background = Console.buttonBg(this, filled, danger)
-        b.setTextColor(if (filled) VOID else if (danger) RED else AMBER)
+    private fun badgeTv(text: String, color: Int): TextView =
+        TextView(this).apply {
+            this.text = text.uppercase()
+            textSize = 10f
+            setTextColor(color)
+            typeface = Console.data(true)
+            background = Console.badgeBg(this@MainActivity, color)
+            setPadding(dp(10), dp(4), dp(10), dp(4))
+        }
+
+    /** Top navigation & title bar for sub-screens. */
+    private fun topDeckBar(
+        title: String,
+        accent: Int = AMBER,
+        badgeText: String? = null,
+        badgeColor: Int = accent,
+        onBack: (() -> Unit)? = { showPickScreen() }
+    ): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        if (onBack != null) {
+            addView(Button(this@MainActivity).apply {
+                text = "← STUDIO"
+                textSize = 11f
+                isAllCaps = false
+                typeface = Console.display()
+                setTextColor(TXT)
+                background = Console.buttonBg(this@MainActivity, primary = false)
+                setPadding(dp(12), dp(6), dp(12), dp(6))
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    dp(36)
+                ).apply { marginEnd = dp(10) }
+                setOnClickListener { onBack() }
+            })
+        }
+        addView(displayTv(title, 20, accent).apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        if (!badgeText.isNullOrBlank()) {
+            addView(badgeTv(badgeText, badgeColor))
+        }
+    }
+
+    private fun styleButton(b: Button, filled: Boolean, danger: Boolean = false, accent: Int = AMBER) {
+        b.background = Console.buttonBg(this, filled, danger, accent)
+        b.setTextColor(if (filled) VOID else if (danger) RED else TXT)
+    }
+
+    private fun stylePill(b: Button, selected: Boolean, accent: Int = AMBER) {
+        b.background = Console.pillBg(this, selected, accent)
+        b.setTextColor(if (selected) TXT else TXT2)
     }
 
     private fun mkButton(
         label: String,
         filled: Boolean = false,
-        danger: Boolean = false
+        danger: Boolean = false,
+        accent: Int = AMBER
     ): Button =
         Button(this).apply {
             text = label.uppercase()
             textSize = 13f
             isAllCaps = false
-            letterSpacing = 0.06f
-            setPadding(dp(14), dp(11), dp(14), dp(11))
+            letterSpacing = 0.05f
+            setPadding(dp(14), dp(10), dp(14), dp(10))
             typeface = Console.display()
-            styleButton(this, filled, danger)
+            styleButton(this, filled, danger, accent)
         }
 
     // ========== PICK SCREEN (single render) + OVERNIGHT QUEUE ==========
@@ -317,42 +369,44 @@ class MainActivity : Activity() {
         return File(blockDir(), "b$blockSeq.html")
     }
 
-    /** One engine card — accent-stroked panel declaring its engine, with
-     *  the engine's primary verbs. The accent IS the engine identity. */
     private fun engineCard(
         title: String,
         kind: String,
         accent: Int,
         summary: String,
+        subNote: String? = null,
         actions: List<Pair<String, () -> Unit>>
     ): LinearLayout {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = Console.panelBg(this@MainActivity, stroke = accent)
+            background = Console.panelBg(this@MainActivity, stroke = accent, fill = PANEL, radiusDp = 10)
             setPadding(dp(16), dp(14), dp(16), dp(14))
         }
         val head = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        head.addView(displayTv(title, 18, accent))
-        head.addView(spacer(dp(8)))
-        head.addView(monoTv(kind.uppercase(), 10, TXT2).apply {
+        head.addView(displayTv(title, 18, accent).apply {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         })
+        head.addView(badgeTv(kind, accent))
         card.addView(head)
-        card.addView(spacer(dp(6)))
-        card.addView(monoTv(summary, 11, TXT2))
+        card.addView(spacer(dp(8)))
+        card.addView(bodyTv(summary, 13, TXT))
+        if (!subNote.isNullOrBlank()) {
+            card.addView(spacer(dp(2)))
+            card.addView(monoTv(subNote, 11, TXT2))
+        }
         card.addView(spacer(dp(12)))
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         actions.forEachIndexed { i, act ->
             if (i > 0) row.addView(spacer(dp(8)))
             row.addView(Button(this).apply {
                 text = act.first.uppercase()
-                textSize = 13f
+                textSize = 12f
                 isAllCaps = false
-                letterSpacing = 0.06f
-                setPadding(dp(12), dp(10), dp(12), dp(10))
+                letterSpacing = 0.05f
+                setPadding(dp(10), dp(8), dp(10), dp(8))
                 typeface = Console.display()
                 background = Console.buttonBg(context, primary = (i == 0), accent = accent)
                 setTextColor(if (i == 0) Console.VOID else Console.CHALK)
@@ -366,15 +420,16 @@ class MainActivity : Activity() {
     }
 
     private fun showPickScreen() {
-        val pad = dp(20)
+        val pad = dp(18)
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
         }
         val farmCount = synchronized(remoteJobs) { remoteJobs.size }
+        val readyDlCount = synchronized(remoteJobs) { remoteJobs.count { it.state == "DONE" && !it.downloaded } }
         val machineAlive = lastGpu.isNotEmpty()
+        val urlSaved = securePrefs.baseUrl.isNotBlank()
 
-        // Wordmark + machine LED — the only always-on status that matters.
         val head = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -382,59 +437,121 @@ class MainActivity : Activity() {
         head.addView(displayTv("Nexon Studio", 24, AMBER).apply {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         })
-        head.addView(monoTv("farm", 10, TXT2).apply {
+        val statusPill = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = Console.panelBg(this@MainActivity, stroke = if (machineAlive) TEAL else STROKE, fill = Console.PANEL_HI, radiusDp = 99)
+            setPadding(dp(10), dp(5), dp(10), dp(5))
             setOnClickListener { showRemoteJobsScreen() }
-        })
-        head.addView(spacer(dp(6)))
-        head.addView(Console.led(this, if (machineAlive) TEAL else Console.EDGE))
+        }
+        statusPill.addView(Console.led(this, if (machineAlive) TEAL else STROKE, 8))
+        statusPill.addView(spacer(dp(6)))
+        statusPill.addView(monoTv(if (machineAlive) "KAGGLE T4 ONLINE" else if (urlSaved) "FARM STANDBY" else "NO TUNNEL URL", 10, if (machineAlive) TEAL else TXT2, true))
+        head.addView(statusPill)
         col.addView(head)
         col.addView(spacer(dp(4)))
         col.addView(bodyTv(
-            "A pocket studio — motion clips to exact MP4s, scripts to voice, on this phone or the Kaggle farm.",
-            12, TXT2))
-        col.addView(spacer(dp(18)))
+            "Broadcast HTML-to-MP4 & Neural TTS production deck — cloud Kaggle 2x T4 GPU farm or local render.",
+            13, TXT2))
+        col.addView(spacer(dp(14)))
 
-        // ---- engine cards: the two things this app does ----
-        col.addView(engineCard(
-            title = "Pixel",
-            kind = "video engine",
-            accent = AMBER,
-            summary = if (htmlFile != null) "loaded: $htmlName" else "no clip loaded yet",
-            actions = listOf(
-                "Choose HTML" to {
-                    queuePick = false
-                    launchPicker()
-                },
-                "Paste HTML" to { pasteHtml() }
-            )
-        ))
+        // ---- PRIMARY HERO: KAGGLE GPU RENDER FARM (Most used workflow) ----
+        val kaggleCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = Console.panelBg(this@MainActivity, stroke = AMBER, fill = PANEL, radiusDp = 10, strokeDp = 2)
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+        }
+        val kHead = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        kHead.addView(displayTv("Kaggle GPU Farm", 19, AMBER).apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        kHead.addView(badgeTv("2x T4 CLOUD", AMBER))
+        kaggleCard.addView(kHead)
+        kaggleCard.addView(spacer(dp(8)))
+        kaggleCard.addView(FarmPulseView(this).apply {
+            setGpus(lastGpu.map { it.id to it.utilPct })
+        })
+        kaggleCard.addView(spacer(dp(8)))
+        val farmSummary = buildString {
+            append("Staged blocks: ${blocks.size}  ·  Active farm jobs: $farmCount")
+            if (readyDlCount > 0) append("  ·  $readyDlCount READY TO DOWNLOAD")
+        }
+        kaggleCard.addView(monoTv(farmSummary, 11, if (readyDlCount > 0) TEAL else TXT, readyDlCount > 0))
+        kaggleCard.addView(spacer(dp(12)))
+
+        val kPrimaryRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        kPrimaryRow.addView(mkButton("Remote Queue (${blocks.size})", filled = true, accent = AMBER).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(46), 1f)
+            setOnClickListener { showRemoteQueueScreen() }
+        })
+        kPrimaryRow.addView(spacer(dp(8)))
+        kPrimaryRow.addView(mkButton(
+            if (readyDlCount > 0) "Jobs ($farmCount · $readyDlCount Ready)" else "Farm Jobs ($farmCount)",
+            filled = readyDlCount > 0,
+            accent = if (readyDlCount > 0) TEAL else AMBER
+        ).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(46), 1f)
+            setOnClickListener { showRemoteJobsScreen() }
+        })
+        kaggleCard.addView(kPrimaryRow)
+        kaggleCard.addView(spacer(dp(8)))
+
+        val kSubRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        kSubRow.addView(mkButton("Kaggle Notebook Setup").apply {
+            textSize = 11f
+            layoutParams = LinearLayout.LayoutParams(0, dp(40), 1f)
+            setOnClickListener { showKaggleSetupScreen() }
+        })
+        kSubRow.addView(spacer(dp(8)))
+        kSubRow.addView(mkButton("Machine Room").apply {
+            textSize = 11f
+            layoutParams = LinearLayout.LayoutParams(0, dp(40), 1f)
+            setOnClickListener { showMachineRoomScreen() }
+        })
+        kaggleCard.addView(kSubRow)
+        col.addView(kaggleCard)
         col.addView(spacer(dp(12)))
+
+        // ---- VOICE STUDIO (Kaggle Qwen3-TTS & Breeze2-TTS) ----
         val voiceCount = VoiceStore(this).list().size
         col.addView(engineCard(
-            title = "Voice",
-            kind = "audio engine",
+            title = "Voice Studio",
+            kind = "Qwen3 · Breeze2",
             accent = TEAL,
             summary = if (voiceCount > 0)
-                "$voiceCount saved ${if (voiceCount == 1) "voice" else "voices"} ready"
-            else "custom · clone · design",
+                "$voiceCount cloned${if (voiceCount == 1) "voice" else "voices"} saved on phone · Custom, Clone & Design modes"
+            else "Neural speech synthesis on Kaggle GPU · Custom, Voice Clone & Design",
+            subNote = if (securePrefs.voiceBaseUrl.isNotBlank()) "Tunnel URL saved" else "Set voice tunnel URL inside studio",
             actions = listOf(
-                "Open studio" to {
+                "Open Voice Studio" to {
                     startActivity(
                         android.content.Intent(this@MainActivity, VoiceActivity::class.java)
                     )
                 }
             )
         ))
-        col.addView(spacer(dp(16)))
+        col.addView(spacer(dp(12)))
 
-        // ---- machine footer: counts at a glance, one door to infrastructure ----
-        col.addView(monoTv("queue ${blocks.size} · farm $farmCount", 11, TXT2))
-        col.addView(spacer(dp(10)))
-        col.addView(mkButton("Machine room", filled = true).apply {
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46))
-            setOnClickListener { showMachineRoomScreen() }
-        })
-        col.addView(spacer(dp(8)))
+        // ---- LOCAL PIXEL ENGINE (Single clip preview & Overnight Phone Queue) ----
+        col.addView(engineCard(
+            title = "Local Pixel Engine",
+            kind = "On-Device MP4",
+            accent = AMBER,
+            summary = if (htmlFile != null) "Loaded clip: $htmlName" else "Inspect framing, crop 16:9 / 9:16, or render directly on this phone",
+            subNote = "Output: ${resW}x${resH} @${fps}fps",
+            actions = listOf(
+                "Choose HTML" to {
+                    queuePick = false
+                    launchPicker()
+                },
+                "Paste HTML" to { pasteHtml() },
+                "Overnight (${blocks.size})" to { showQueueScreen() }
+            )
+        ))
+        col.addView(spacer(dp(12)))
         showScreen(android.widget.ScrollView(this).apply { addView(col) })
     }
 
@@ -443,33 +560,38 @@ class MainActivity : Activity() {
     /** Queue builder for the overnight batch - reached from home. */
     private fun showQueueScreen() {
         remoteQueuePick = false
-        val pad = dp(20)
+        val pad = dp(18)
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
         }
-        col.addView(displayTv("Overnight queue", 24, AMBER))
-        col.addView(spacer(dp(4)))
+        col.addView(topDeckBar("Overnight Phone Queue", AMBER, "${blocks.size} BLOCKS"))
+        col.addView(spacer(dp(6)))
         col.addView(bodyTv(
-            "Blocks render one at a time on this phone, screen off, while you sleep.",
+            "Blocks render sequentially on this phone with the screen off via Foreground Service wake-lock.",
             13, TXT2))
-        col.addView(spacer(dp(16)))
+        col.addView(spacer(dp(14)))
 
-        // ---- queue: add block 1, then + the next, until N ----
-        col.addView(displayTv("Queue · ${blocks.size} block" + if (blocks.size == 1) "" else "s", 13, TXT))
-        col.addView(spacer(dp(8)))
+        val queueCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = Console.panelBg(context)
+            setPadding(dp(14), dp(12), dp(14), dp(14))
+        }
+        queueCard.addView(displayTv("Staged HTML Blocks (${blocks.size})", 13, TXT))
+        queueCard.addView(spacer(dp(8)))
         if (blocks.isEmpty()) {
-            col.addView(bodyTv("Nothing queued yet. Add blocks and start the batch before bed.", 12, TXT2))
+            queueCard.addView(bodyTv("No HTML clips staged yet. Add files or paste code below.", 12, TXT2))
+            queueCard.addView(spacer(dp(6)))
         }
         blocks.forEachIndexed { i, b ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                background = Console.panelBg(context)
+                background = Console.fieldBg(context)
                 setPadding(dp(12), dp(8), dp(8), dp(8))
             }
             row.addView(
-                monoTv("B${i + 1}  ${b.name}", 12, TXT).apply {
+                monoTv("#${i + 1}  ${b.name}  (${readBlockDuration(b.file)}s)", 12, TXT, true).apply {
                     layoutParams = LinearLayout.LayoutParams(
                         0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
                     )
@@ -477,6 +599,8 @@ class MainActivity : Activity() {
             )
             row.addView(
                 mkButton("Remove", danger = true).apply {
+                    textSize = 11f
+                    setPadding(dp(10), dp(6), dp(10), dp(6))
                     setOnClickListener {
                         if (!batchRunning) {
                             blocks.removeAt(i)
@@ -486,35 +610,34 @@ class MainActivity : Activity() {
                     }
                 }
             )
-            col.addView(
+            queueCard.addView(
                 row,
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 )
             )
-            col.addView(spacer(dp(6)))
+            queueCard.addView(spacer(dp(6)))
         }
-        col.addView(spacer(dp(6)))
-        col.addView(mkButton("Add block from file", filled = true).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(48)
-            )
+        queueCard.addView(spacer(dp(6)))
+        val addRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        addRow.addView(mkButton("+ Add HTML File", filled = true).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f)
             setOnClickListener {
                 queuePick = true
                 launchPicker()
             }
         })
-        col.addView(spacer(dp(8)))
-        col.addView(mkButton("Paste block code").apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(44)
-            )
+        addRow.addView(spacer(dp(8)))
+        addRow.addView(mkButton("+ Paste HTML").apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f)
             setOnClickListener { pasteBlock() }
         })
+        queueCard.addView(addRow)
         if (blocks.isNotEmpty()) {
-            col.addView(spacer(dp(8)))
-            col.addView(mkButton("Clear queue", danger = true).apply {
+            queueCard.addView(spacer(dp(8)))
+            queueCard.addView(mkButton("Clear All Staged Blocks", danger = true).apply {
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40))
                 setOnClickListener {
                     if (!batchRunning) {
                         blocks.clear()
@@ -526,10 +649,18 @@ class MainActivity : Activity() {
                 }
             })
         }
-        col.addView(spacer(dp(24)))
+        col.addView(queueCard)
+        col.addView(spacer(dp(14)))
 
+        val fmtCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = Console.panelBg(context)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+        }
+        fmtCard.addView(displayTv("Batch Render Parameters", 13, AMBER))
+        fmtCard.addView(spacer(dp(10)))
         toggleRow(
-            col, "RATIO",
+            fmtCard, "RATIO",
             listOf(
                 "16:9" to { setRatio(false) },
                 "9:16" to { setRatio(true) }
@@ -537,7 +668,7 @@ class MainActivity : Activity() {
             ratioIndex()
         )
         val qResRow = toggleRow(
-            col, "RESOLUTION",
+            fmtCard, "RESOLUTION",
             listOf(
                 "4K" to { applyRes(3840, 2160) },
                 "1080p" to { applyRes(1920, 1080) },
@@ -547,7 +678,7 @@ class MainActivity : Activity() {
             resPresetIndex()
         )
         val qFpsRow = toggleRow(
-            col, "FPS",
+            fmtCard, "FPS",
             listOf(
                 "30" to { fps = 30 },
                 "24" to { fps = 24 },
@@ -556,7 +687,7 @@ class MainActivity : Activity() {
             if (fps == 30) 0 else if (fps == 24) 1 else 2
         )
         toggleRow(
-            col, "MODE",
+            fmtCard, "PRESET",
             listOf(
                 "FINAL" to {
                     qResRow.select(1); applyRes(1920, 1080)
@@ -570,29 +701,29 @@ class MainActivity : Activity() {
             if (maxOf(resW, resH) == 1920 && fps == 30) 0 else 1
         )
         toggleRow(
-            col, "BITRATE",
+            fmtCard, "BITRATE",
             listOf(
-                "12M mob" to { bitRate = 12_000_000 },
-                "20M mob" to { bitRate = 20_000_000 },
-                "40M lap" to { bitRate = 40_000_000 },
-                "80M max" to { bitRate = 80_000_000 }
+                "12M" to { bitRate = 12_000_000 },
+                "20M" to { bitRate = 20_000_000 },
+                "40M" to { bitRate = 40_000_000 },
+                "80M" to { bitRate = 80_000_000 }
             ),
             if (bitRate == 12_000_000) 0 else if (bitRate == 20_000_000) 1 else if (bitRate == 40_000_000) 2 else 3
         )
-        // ENHANCE applies to every block in the batch (one global setting).
         toggleRow(
-            col, "ENHANCE",
+            fmtCard, "COLOR GRADE",
             listOf(
-                "OFF" to { batchEnhance = false },
-                "ON" to { batchEnhance = true }
+                "STANDARD" to { batchEnhance = false },
+                "ENHANCE" to { batchEnhance = true }
             ),
             if (batchEnhance) 1 else 0
         )
+        col.addView(fmtCard)
 
-        col.addView(spacer(dp(20)))
+        col.addView(spacer(dp(16)))
         col.addView(
             mkButton(
-                if (blocks.isEmpty()) "START OVERNIGHT" else "START OVERNIGHT (${blocks.size})",
+                if (blocks.isEmpty()) "START OVERNIGHT RENDER" else "START OVERNIGHT RENDER (${blocks.size})",
                 filled = true
             ).apply {
                 layoutParams = LinearLayout.LayoutParams(
@@ -601,16 +732,21 @@ class MainActivity : Activity() {
                 setOnClickListener { startOvernight() }
             }
         )
-        col.addView(spacer(dp(8)))
-        col.addView(mkButton("BACK").apply { setOnClickListener { showPickScreen() } })
+        col.addView(spacer(dp(12)))
 
         showScreen(android.widget.ScrollView(this).apply { addView(col) })
     }
 
-    /** Two-option toggle row; select() restyles without re-running actions. */
-    private inner class ToggleRow(opts: List<Pair<String, () -> Unit>>) {
+    /** Segmented pill row; select() restyles with pillBg without re-running actions. */
+    private inner class ToggleRow(opts: List<Pair<String, () -> Unit>>, private val accent: Int = AMBER) {
         val buttons: Array<Button> = Array(opts.size) { i ->
-            mkButton(opts[i].first).apply {
+            Button(this@MainActivity).apply {
+                text = opts[i].first.uppercase()
+                textSize = 11f
+                isAllCaps = false
+                letterSpacing = 0.04f
+                typeface = Console.display()
+                setPadding(dp(6), dp(6), dp(6), dp(6))
                 setOnClickListener {
                     select(i)
                     opts[i].second()
@@ -619,7 +755,7 @@ class MainActivity : Activity() {
         }
 
         fun select(i: Int) {
-            for (j in buttons.indices) styleButton(buttons[j], j == i)
+            for (j in buttons.indices) stylePill(buttons[j], j == i, accent)
         }
     }
 
@@ -627,25 +763,26 @@ class MainActivity : Activity() {
         parent: LinearLayout,
         label: String,
         opts: List<Pair<String, () -> Unit>>,
-        initial: Int
+        initial: Int,
+        accent: Int = AMBER
     ): ToggleRow {
-        val row = ToggleRow(opts)
+        val row = ToggleRow(opts, accent)
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        box.addView(displayTv(label, 12, TXT2).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(112), ViewGroup.LayoutParams.WRAP_CONTENT)
+        box.addView(displayTv(label, 11, TXT2).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(92), ViewGroup.LayoutParams.WRAP_CONTENT)
         })
         for (b in row.buttons) {
             box.addView(
                 b,
-                LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginStart = dp(6) }
+                LinearLayout.LayoutParams(0, dp(38), 1f).apply { marginStart = dp(6) }
             )
         }
         row.select(initial)
         parent.addView(box)
-        parent.addView(spacer(dp(10)))
+        parent.addView(spacer(dp(8)))
         return row
     }
 
@@ -653,13 +790,22 @@ class MainActivity : Activity() {
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
+            setPadding(dp(24), dp(24), dp(24), dp(24))
         }
-        // Transparent: keep the ghost WebView's on-screen composite alive.
-        col.addView(bodyTv(message, 13, TXT2))
-        col.addView(spacer(dp(14)))
-        col.addView(ProgressBar(this).apply {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            background = Console.panelBg(this@MainActivity, stroke = AMBER, fill = PANEL, radiusDp = 12)
+            setPadding(dp(28), dp(24), dp(28), dp(24))
+        }
+        card.addView(ProgressBar(this).apply {
             indeterminateTintList = android.content.res.ColorStateList.valueOf(AMBER)
         })
+        card.addView(spacer(dp(14)))
+        card.addView(displayTv(message, 14, AMBER))
+        col.addView(card, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
         showScreen(col)
     }
 

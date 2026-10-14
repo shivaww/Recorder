@@ -4,42 +4,45 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import kotlin.math.roundToInt
 
 /**
- * Console — the app's design system. One palette, three type roles, and the
- * card / button / rail / pulse builders every screen composes from.
- * Identity: a pocket mission-control for a remote GPU render farm.
+ * Console — Broadcast Deck & Field Monitor design system.
  *
- * Engine accents are semantic: AMBER = PIXEL (video engine), TEAL = VOICE
- * (audio engine). A screen states which engine it operates through the accent
- * it carries — the accent is information, never decoration.
+ * Semantic engine accents:
+ *  - AMBER (Cine Gold) = PIXEL & Kaggle GPU Farm
+ *  - TEAL  (Sonic Cyan) = VOICE Studio & Healthy / Verified telemetry
+ *  - ALERT (Signal Coral) = Destructive / Fault states
  */
 object Console {
-    // Palette — named tokens; CHALK_DIM is secondary text.
-    const val VOID = 0xFF0A0D12.toInt()       // room with the monitors off
-    const val PANEL = 0xFF141926.toInt()      // raised console surface, blue-cast steel
-    const val EDGE = 0xFF232B3D.toInt()       // hairline steel stroke
-    const val AMBER = 0xFFFFB454.toInt()      // PIXEL — video engine accent
-    const val TEAL = 0xFF3FD9B0.toInt()       // VOICE — audio engine accent
-    const val ALERT = 0xFFFF5C5C.toInt()      // error / destructive
-    const val CHALK = 0xFFE8E4D8.toInt()      // primary ink, warm chalk
-    const val CHALK_DIM = 0x9E9BA3B5.toInt()  // secondary ink
+    const val VOID = 0xFF0D1117.toInt()       // Obsidian slate chassis background
+    const val PANEL = 0xFF161D27.toInt()      // Primary deck card surface
+    const val PANEL_HI = 0xFF1E2736.toInt()   // Elevated control bay / secondary button
+    const val FIELD_BG = 0xFF0F151D.toInt()   // Recessed input well / unselected pill
+    const val EDGE = 0xFF2E3B4E.toInt()       // Crisp hairline steel border
+    const val AMBER = 0xFFF5A623.toInt()      // PIXEL / Kaggle GPU primary accent
+    const val AMBER_SOFT = 0x2EF5A623.toInt() // Tinted selection fill (Amber)
+    const val TEAL = 0xFF2DD4BF.toInt()       // VOICE / Verified primary accent
+    const val TEAL_SOFT = 0x2E2DD4BF.toInt()  // Tinted selection fill (Teal)
+    const val ALERT = 0xFFF87171.toInt()      // High-legibility coral error/danger
+    const val ALERT_SOFT = 0x26F87171.toInt() // Tinted danger fill
+    const val CHALK = 0xFFF3F4F6.toInt()      // Alabaster primary ink (WCAG AAA)
+    const val CHALK_DIM = 0xFFB0BAC9.toInt()  // Silver mist secondary ink (opaque, readable)
 
-    // ---- type: three bundled faces (res/font), loaded once per process ----
     @Volatile private var tfDisplay: Typeface? = null
     @Volatile private var tfData: Typeface? = null
     @Volatile private var tfDataBold: Typeface? = null
     @Volatile private var tfBody: Typeface? = null
 
-    /** Call once from each Activity's onCreate, before building any view. */
     fun init(ctx: Context) {
         if (tfDisplay == null) tfDisplay = fetch(ctx, R.font.chakra_petch)
         if (tfData == null) tfData = fetch(ctx, R.font.plex_mono)
@@ -53,9 +56,6 @@ object Console {
         null
     }
 
-    // Type roles: DISPLAY = titles + control labels (Chakra Petch, used with
-    // restraint); DATA = every number, id, eta (IBM Plex Mono); BODY = helper
-    // sentences (Saira).
     fun display(bold: Boolean = true): Typeface =
         tfDisplay ?: Typeface.create(
             "sans-serif-condensed", if (bold) Typeface.BOLD else Typeface.NORMAL
@@ -69,59 +69,95 @@ object Console {
 
     fun dp(ctx: Context, v: Int): Int = (ctx.resources.displayMetrics.density * v).roundToInt()
 
-    fun panelBg(ctx: Context, stroke: Int = EDGE): GradientDrawable = GradientDrawable().apply {
-        setColor(PANEL)
-        setStroke(dp(ctx, 1), stroke)
-        cornerRadius = dp(ctx, 4).toFloat()
+    fun panelBg(
+        ctx: Context,
+        stroke: Int = EDGE,
+        fill: Int = PANEL,
+        radiusDp: Int = 8,
+        strokeDp: Int = 1
+    ): GradientDrawable = GradientDrawable().apply {
+        setColor(fill)
+        setStroke(dp(ctx, strokeDp), stroke)
+        cornerRadius = dp(ctx, radiusDp).toFloat()
     }
 
-    /** Primary fills with the engine accent (AMBER by default; VOICE screens
-     *  pass TEAL). Quiet buttons are steel strokes. */
+    fun fieldBg(ctx: Context, stroke: Int = EDGE): GradientDrawable =
+        panelBg(ctx, stroke = stroke, fill = FIELD_BG, radiusDp = 6, strokeDp = 1)
+
+    fun badgeBg(ctx: Context, color: Int): GradientDrawable = GradientDrawable().apply {
+        val fill = (color and 0x00FFFFFF) or 0x24000000
+        setColor(fill)
+        setStroke(dp(ctx, 1), color)
+        cornerRadius = dp(ctx, 99).toFloat()
+    }
+
+    /**
+     * Button surface:
+     *  - primary: solid engine accent (AMBER or TEAL) with dark VOID text
+     *  - danger: tinted coral surface with ALERT stroke
+     *  - secondary: elevated slate surface (PANEL_HI) with EDGE stroke
+     */
     fun buttonBg(
         ctx: Context,
         primary: Boolean,
         danger: Boolean = false,
         accent: Int = AMBER
     ): GradientDrawable = GradientDrawable().apply {
-        cornerRadius = dp(ctx, 4).toFloat()
-        if (primary) setColor(accent)
-        else {
-            setColor(0x00000000)
-            setStroke(dp(ctx, 1), if (danger) ALERT else EDGE)
+        cornerRadius = dp(ctx, 6).toFloat()
+        when {
+            primary -> setColor(accent)
+            danger -> {
+                setColor(ALERT_SOFT)
+                setStroke(dp(ctx, 1), ALERT)
+            }
+            else -> {
+                setColor(PANEL_HI)
+                setStroke(dp(ctx, 1), EDGE)
+            }
         }
     }
 
-    /** Stripe/accent per job state — encodes truth, never decoration. */
+    /** Segmented toggle pill background — distinct from full-width action buttons. */
+    fun pillBg(ctx: Context, selected: Boolean, accent: Int = AMBER): GradientDrawable =
+        GradientDrawable().apply {
+            cornerRadius = dp(ctx, 6).toFloat()
+            if (selected) {
+                setColor(if (accent == TEAL) TEAL_SOFT else AMBER_SOFT)
+                setStroke(dp(ctx, 2), accent)
+            } else {
+                setColor(FIELD_BG)
+                setStroke(dp(ctx, 1), EDGE)
+            }
+        }
+
     fun stateColor(state: String, downloaded: Boolean): Int = when {
         downloaded || state == "DONE" -> TEAL
-        state == "RENDERING" || state == "ENCODING" -> AMBER
+        state == "RENDERING" || state == "ENCODING" || state == "WAITING_START" -> AMBER
         state == "FAILED" || state == "INVALID" -> ALERT
         else -> CHALK_DIM
     }
 
-    fun rail(ctx: Context): ProgressBar =
+    fun rail(ctx: Context, accent: Int = TEAL): ProgressBar =
         ProgressBar(ctx, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
-            progressTintList = ColorStateList.valueOf(TEAL)
+            progressTintList = ColorStateList.valueOf(accent)
             progressBackgroundTintList = ColorStateList.valueOf(EDGE)
-            minHeight = dp(ctx, 6)
+            minHeight = dp(ctx, 8)
         }
 
-    /** Status LED — a small lamp that carries machine state (alive / offline). */
-    fun led(ctx: Context, color: Int, diameterDp: Int = 8): View =
+    fun led(ctx: Context, color: Int, diameterDp: Int = 10): View =
         View(ctx).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(color)
+                setStroke(dp(ctx, 2), (color and 0x00FFFFFF) or 0x44000000)
             }
             layoutParams = LinearLayout.LayoutParams(dp(ctx, diameterDp), dp(ctx, diameterDp))
         }
 
     /**
-     * PipelineRail — the signature element. The render pipeline is a real
-     * sequence, so the rail states it: active step lit in the engine accent,
-     * completed steps carrying their captured decision (e.g. "720p · 30").
-     * steps = (label, note) pairs; note may be "" until the step is taken.
+     * PipelineRail — broadcast step bar showing sequence order (01, 02...),
+     * active highlight bar, and captured technical decision notes.
      */
     fun pipelineRail(
         ctx: Context,
@@ -129,53 +165,71 @@ object Console {
         active: Int,
         accent: Int
     ): View {
-        val row = LinearLayout(ctx).apply {
+        val container = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            background = panelBg(ctx, stroke = EDGE, fill = PANEL, radiusDp = 8)
+            setPadding(dp(ctx, 6), dp(ctx, 8), dp(ctx, 6), dp(ctx, 8))
         }
         steps.forEachIndexed { i, stepDef ->
-            if (i > 0) {
-                row.addView(View(ctx).apply {
-                    setBackgroundColor(EDGE)
-                    layoutParams = LinearLayout.LayoutParams(0, dp(ctx, 1), 1f)
-                })
-            }
-            val step = LinearLayout(ctx).apply {
+            val isActive = i == active
+            val isDone = i < active
+            val stepCol = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_HORIZONTAL
                 setPadding(dp(ctx, 6), dp(ctx, 4), dp(ctx, 6), dp(ctx, 4))
+                if (isActive) {
+                    background = pillBg(ctx, selected = true, accent = accent)
+                }
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    if (i > 0) marginStart = dp(ctx, 4)
+                }
             }
-            step.addView(TextView(ctx).apply {
-                text = stepDef.first.uppercase()
+            val titleColor = when {
+                isActive -> accent
+                isDone -> CHALK
+                else -> CHALK_DIM
+            }
+            stepCol.addView(TextView(ctx).apply {
+                text = String.format("%02d · %s", i + 1, stepDef.first.uppercase())
                 textSize = 10f
-                setTextColor(if (i == active) accent else CHALK_DIM)
+                setTextColor(titleColor)
                 typeface = display()
-                letterSpacing = 0.08f
+                letterSpacing = 0.06f
+                isSingleLine = true
             })
-            step.addView(TextView(ctx).apply {
-                text = if (i <= active) stepDef.second else ""
-                textSize = 9f
-                setTextColor(if (i <= active) CHALK else CHALK_DIM)
-                typeface = data()
-                minHeight = dp(ctx, 11)
+            val noteText = if (i <= active && stepDef.second.isNotBlank()) stepDef.second else "—"
+            stepCol.addView(TextView(ctx).apply {
+                text = noteText
+                textSize = 10f
+                setTextColor(if (isActive) CHALK else CHALK_DIM)
+                typeface = data(isActive)
+                isSingleLine = true
+                setPadding(0, dp(ctx, 2), 0, 0)
             })
-            row.addView(step)
+            container.addView(stepCol)
         }
-        return row
+        return container
     }
 }
 
 /**
- * FarmPulse — the farm's heartbeat: one segmented rail per GPU, fill width
- * = live utilization from the /gpu poll, label set inside.
+ * FarmPulseView — live dual-T4 Kaggle GPU utilization telemetry bar.
  */
 class FarmPulseView(ctx: Context) : View(ctx) {
-    private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val label = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Console.CHALK
-        textSize = Console.dp(ctx, 9).toFloat()
-        typeface = Console.data()
+    private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Console.FIELD_BG }
+    private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Console.EDGE
+        style = Paint.Style.STROKE
+        strokeWidth = Console.dp(ctx, 1).toFloat()
     }
+    private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Console.CHALK
+        textSize = Console.dp(ctx, 11).toFloat()
+        typeface = Console.data(true)
+    }
+    private val rect = RectF()
     private var gpus: List<Pair<Int, Int>> = emptyList()
 
     fun setGpus(list: List<Pair<Int, Int>>) {
@@ -184,22 +238,44 @@ class FarmPulseView(ctx: Context) : View(ctx) {
     }
 
     override fun onMeasure(widthSpec: Int, heightSpec: Int) =
-        setMeasuredDimension(MeasureSpec.getSize(widthSpec), Console.dp(context, 18))
+        setMeasuredDimension(MeasureSpec.getSize(widthSpec), Console.dp(context, 28))
 
     override fun onDraw(c: Canvas) {
         super.onDraw(c)
-        if (gpus.isEmpty() || width == 0) return
-        val gap = Console.dp(context, 6).toFloat()
-        val segW = (width - gap * (gpus.size - 1)) / gpus.size
+        if (width == 0) return
+        val r = Console.dp(context, 6).toFloat()
         val h = height.toFloat()
+        if (gpus.isEmpty()) {
+            rect.set(0f, 0f, width.toFloat(), h)
+            c.drawRoundRect(rect, r, r, trackPaint)
+            c.drawRoundRect(rect, r, r, borderPaint)
+            labelPaint.color = Console.CHALK_DIM
+            c.drawText("KAGGLE T4 TELEMETRY · STANDBY (NO ACTIVE POLL)", Console.dp(context, 10).toFloat(), h * 0.66f, labelPaint)
+            return
+        }
+        labelPaint.color = Console.CHALK
+        val gap = Console.dp(context, 8).toFloat()
+        val segW = (width - gap * (gpus.size - 1)) / gpus.size
         gpus.forEachIndexed { i, gpu ->
             val x = i * (segW + gap)
-            fill.color = Console.EDGE
-            c.drawRect(x, 0f, x + segW, h, fill)
-            val w = segW * gpu.second.coerceIn(0, 100) / 100f
-            fill.color = if (gpu.second >= 85) Console.AMBER else Console.TEAL
-            c.drawRect(x, 0f, x + w, h, fill)
-            c.drawText("GPU${gpu.first} ${gpu.second}%", x + Console.dp(context, 4), h * 0.74f, label)
+            rect.set(x, 0f, x + segW, h)
+            c.drawRoundRect(rect, r, r, trackPaint)
+            val pct = gpu.second.coerceIn(0, 100)
+            if (pct > 0) {
+                val w = (segW * pct / 100f).coerceAtLeast(r * 2)
+                fillPaint.color = if (pct >= 85) 0x55F5A623 else 0x552DD4BF
+                rect.set(x, 0f, (x + w).coerceAtMost(x + segW), h)
+                c.drawRoundRect(rect, r, r, fillPaint)
+            }
+            rect.set(x, 0f, x + segW, h)
+            borderPaint.color = if (pct > 0) Console.TEAL else Console.EDGE
+            c.drawRoundRect(rect, r, r, borderPaint)
+            c.drawText(
+                "GPU ${gpu.first}  ·  ${pct}% LOAD",
+                x + Console.dp(context, 10),
+                h * 0.66f,
+                labelPaint
+            )
         }
     }
 }
