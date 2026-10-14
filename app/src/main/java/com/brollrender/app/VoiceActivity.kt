@@ -55,6 +55,12 @@ class VoiceActivity : Activity() {
             "!rm -rf /kaggle/working/V && git clone --depth 1 " +
                 "https://github.com/shivaww/Recorder.git /kaggle/working/V && " +
                 "cd /kaggle/working/V/qwen3tts && bash run.sh"
+
+        /** Second engine: boots the Breeze2-TTS voice server (its own port). */
+        const val BREEZE_BOOTSTRAP_CMD =
+            "!rm -rf /kaggle/working/V && git clone --depth 1 " +
+                "https://github.com/shivaww/Recorder.git /kaggle/working/V && " +
+                "cd /kaggle/working/V/breeze2tts && bash run.sh"
     }
 
     private lateinit var securePrefs: SecurePrefs
@@ -282,7 +288,7 @@ class VoiceActivity : Activity() {
         ))
         col.addView(spacer(dp(14)))
         col.addView(bodyTv(
-            "Qwen3-TTS — preset speakers, 3-second voice cloning and natural-language voice design, generated on your Kaggle GPU notebook.",
+            "Two TTS engines on your Kaggle GPU notebook — Qwen3-TTS: 9 preset speakers, cloning, voice design. Breeze2-TTS: top-ranked open-weights voice — cloning, design, delivery direction, emotional tags.",
             12, TXT2))
         col.addView(spacer(dp(16)))
         buildConnectionCard(col)
@@ -358,19 +364,42 @@ class VoiceActivity : Activity() {
     }
 
     private fun buildBootstrapCard(col: LinearLayout) {
+        buildEngineCard(
+            col,
+            "Start the voice server — Qwen3-TTS (Kaggle)",
+            "New Kaggle notebook → Settings → Accelerator → GPU T4 x2, then paste this into a cell and run. When it prints READY, copy the BASE URL into Connection above.",
+            BOOTSTRAP_CMD,
+            "voice-bootstrap",
+            null)
+        col.addView(spacer(dp(14)))
+        buildEngineCard(
+            col,
+            "Start the voice server — Breeze2-TTS (Kaggle)",
+            "Second engine, same flow: paste into its own GPU notebook cell, run, and copy the BASE URL it prints into Connection. No preset speakers — in Custom mode the instruct line describes the voice; emotional tags like (sigh) work in the script text.",
+            BREEZE_BOOTSTRAP_CMD,
+            "breeze-bootstrap",
+            "License: Breeze2 model weights are research / non-commercial use; code is Apache-2.0.")
+    }
+
+    private fun buildEngineCard(
+        col: LinearLayout,
+        title: String,
+        guide: String,
+        cmd: String,
+        clipLabel: String,
+        licenseNote: String?
+    ) {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = Console.panelBg(context)
             setPadding(dp(14), dp(12), dp(14), dp(14))
         }
-        card.addView(displayTv("Start the voice server (Kaggle)", 12, TXT))
+        card.addView(displayTv(title, 12, TXT))
         card.addView(spacer(dp(6)))
-        card.addView(bodyTv(
-            "New Kaggle notebook → Settings → Accelerator → GPU T4 x2, then paste this into a cell and run. When it prints READY, copy the BASE URL into Connection above.",
-            11, TXT2))
+        card.addView(bodyTv(guide, 11, TXT2))
         card.addView(spacer(dp(8)))
         card.addView(TextView(this).apply {
-            text = BOOTSTRAP_CMD
+            text = cmd
             textSize = 10f
             typeface = Console.data()
             setTextColor(TXT2)
@@ -381,11 +410,15 @@ class VoiceActivity : Activity() {
         card.addView(mkButton("Copy command", filled = true).apply {
             setOnClickListener {
                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("voice-bootstrap", BOOTSTRAP_CMD))
+                clipboard.setPrimaryClip(ClipData.newPlainText(clipLabel, cmd))
                 text = "COPIED"
                 postDelayed({ text = "COPY COMMAND" }, 2000)
             }
         })
+        if (licenseNote != null) {
+            card.addView(spacer(dp(6)))
+            card.addView(bodyTv(licenseNote, 10, RED))
+        }
         col.addView(card, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     }
