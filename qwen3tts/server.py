@@ -75,7 +75,9 @@ else:
 os.makedirs(OUT_DIR, exist_ok=True)
 
 VO_MARKER = "{here complete voice over}"
-MAX_CHUNK_CHARS = 500
+# Chunk length bounds seam count: every seam re-samples delivery and
+# level. 1200 chars ~= 80 s of speech; the 2048-token cap allows ~170 s.
+MAX_CHUNK_CHARS = 1200
 # Longest reference clip accepted for cloning, in seconds. Clips are never
 # truncated: ref_text must stay a transcript of the whole clip.
 MAX_REF_SECONDS = 30
@@ -576,6 +578,25 @@ def _dev_lock(dev: str):
         return _dev_locks.setdefault(dev, threading.RLock())
 
 
+def _speech_rms(audio):
+    """RMS of a 1-D speech tensor; None for empty audio."""
+    if audio.numel() == 0:
+        return None
+    return float(torch.sqrt(torch.mean(audio.double() ** 2)))
+
+
+def _match_rms(wav, ref_rms, max_gain_db=10.0):
+    """Gain-match a chunk to ref_rms (the first chunk's speech level)."""
+    r = _speech_rms(wav)
+    if r is None or ref_rms is None or r <= 0.0:
+        return wav
+    cap = 10 ** (max_gain_db / 20.0)
+    gain = min(max(ref_rms / r, 1.0 / cap), cap)
+    if abs(gain - 1.0) < 1e-3:
+        return wav
+    return (wav * gain).clamp(-1.0, 1.0)
+
+
 def synthesize(mode, text, language, speaker, instruct, ref_audio, ref_text, design_prompt, job_id, speed=1.0, loudness=1.0):
     """Serialize jobs per GPU so loads and evictions never overlap a running job."""
     m = (mode or "custom").lower().strip()
@@ -591,6 +612,7 @@ def _synthesize_impl(mode, text, language, speaker, instruct, ref_audio, ref_tex
     chunks = chunk_text(vo_text)
 
     pieces = []
+    ref_rms = None
     sr = 24000
     for i, chunk in enumerate(chunks):
         print(f"[{job_id}] {mode} chunk {i+1}/{len(chunks)}: {chunk[:55]}...")
@@ -600,6 +622,12 @@ def _synthesize_impl(mode, text, language, speaker, instruct, ref_audio, ref_tex
         )
         # Trim the model's own leading/trailing silence so we own the seam.
         wav = _trim_silence(wav, sr)
+        # Loudness continuity: match every later chunk to the first chunk's
+        # speech RMS so a long script stays at one level end to end.
+        if i == 0:
+            ref_rms = _speech_rms(wav)
+        else:
+            wav = _match_rms(wav, ref_rms)
         # Leak trim net retired: x-vector-only cloning removes the ICL
         # reference-text path that leaked (#341), and the trimmer's word
         # timestamp cuts ate legitimate first words of the target.

@@ -256,6 +256,25 @@ def _pause_for(chunk, sr, default_ms=150.0):
 _synth_lock = threading.Lock()
 
 
+def _speech_rms(audio):
+    """RMS of a mono numpy speech array; None for empty audio."""
+    if audio is None or audio.size == 0:
+        return None
+    return float(np.sqrt(np.mean(audio.astype(np.float64) ** 2)))
+
+
+def _match_rms(wav, ref_rms, max_gain_db=10.0):
+    """Gain-match a chunk to ref_rms (the first chunk's speech level)."""
+    r = _speech_rms(wav)
+    if r is None or ref_rms is None or r <= 0.0:
+        return wav
+    cap = 10.0 ** (max_gain_db / 20.0)
+    gain = min(max(ref_rms / r, 1.0 / cap), cap)
+    if abs(gain - 1.0) < 1e-3:
+        return wav
+    return np.clip(wav * gain, -1.0, 1.0).astype(np.float32)
+
+
 def synthesize(mode, text, instruction, ref_path, ref_text, cfg_scale, seed, job_id, loudness=1.0):
     """Serialize the whole job (single model, single GPU) and stitch chunks."""
     vo_text = extract_vo(text)
@@ -264,6 +283,7 @@ def synthesize(mode, text, instruction, ref_path, ref_text, cfg_scale, seed, job
         raise ValueError("no text to synthesize after VO marker extraction")
     with _synth_lock:
         pieces = []
+        ref_rms = None
         sr = REF_SR
         for i, chunk in enumerate(chunks):
             print("[%s] %s chunk %d/%d: %s..." % (job_id, mode, i + 1, len(chunks), chunk[:55]))
@@ -272,6 +292,11 @@ def synthesize(mode, text, instruction, ref_path, ref_text, cfg_scale, seed, job
             )
             # Own the seam: trim the model's own edge silence, then fade.
             wav = _trim_silence(wav, sr)
+            # Loudness continuity: match every later chunk to the first.
+            if i == 0:
+                ref_rms = _speech_rms(wav)
+            else:
+                wav = _match_rms(wav, ref_rms)
             wav = _edge_fade(wav, sr)
             pieces.append(wav)
             if i < len(chunks) - 1:
