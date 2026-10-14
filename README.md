@@ -67,4 +67,4 @@ A second TTS engine: BreezeBlue/breeze-tts-2 via breezeblue-ai/breeze-tts — to
 
 Modes: **custom** (plain text; optional natural-language instruct — Breeze has no preset speakers, so `speaker` is ignored), **clone** (reference audio + its exact transcript, mandatory), **design** (describe the voice in natural language), **direction** (clone + delivery instruction). Inline emotional tags — `(sigh)`, `(laugh)`, `[笑]` — are interpreted in the text itself. Output: mono 24 kHz WAV. Note: model weights carry a research/non-commercial license (code is Apache-2.0).
 
-App-side engine selection is pending; until then the server is directly testable — same endpoints and form fields as the qwen server (`/health`, `/generate`, `/status/<id>`, `/download/<id>`), so the existing client contract works unchanged.
+The app's Connection field works with either engine's BASE URL (verified: custom/clone/design flow through unchanged; in custom mode the instruct line describes the voice) — same endpoints and form fields as the qwen server (`/health`, `/generate`, `/status/<id>`, `/download/<id>`), so the existing client contract works unchanged.
