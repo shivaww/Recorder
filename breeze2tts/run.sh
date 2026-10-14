@@ -45,8 +45,14 @@ if [ ! -d "$REPO" ]; then
 fi
 python -m pip install -q -r "$REPO/requirements.txt" \
   || echo "  WARNING: some pinned requirements failed - continuing"
+# Kaggle preinstalls torchvision 0.25+cu128 (built for its torch 2.10); the
+# torch 2.9.1 pin above leaves that torchvision broken (its compiled nms
+# operator no longer exists), and transformers imports torchvision at module
+# load. Install the build matching torch 2.9.1.
+python -m pip install -q torchvision==0.24.1 \
+  || echo "  WARNING: torchvision pin failed"
 python -m pip install -q flask flask-cors
-if ! python -c "import flask, flask_cors, soundfile, transformers" 2>/dev/null; then
+if ! python -c "import flask, flask_cors, soundfile, transformers, torchvision" 2>/dev/null; then
   echo "  FATAL: pip install failed - re-run the cell."
   exit 1
 fi
