@@ -57,4 +57,4 @@ In-app voice generation on a Kaggle GPU notebook — same one-command pattern as
 4. Three modes: **Custom** (9 preset speakers + instruct for tone/emotion), **Clone** (3–15 s reference audio + its exact transcript), **Design** (describe the voice in natural language). Paste the script — `{here complete voice over}` marks narration start — and generate.
 5. The finished WAV lands in `Music/NexonStudio/` with play/share buttons.
 
-Server files live in `voice/` (`run.sh` one-command launcher + `server.py`); Qwen3-TTS models lazy-load per mode on first request. Re-running the cell is safe: it kills the old server/tunnel and starts fresh.
+Server files live in `qwen3tts/` (`run.sh` one-command launcher + `server.py`); Qwen3-TTS models lazy-load per mode on first request. Re-running the cell is safe: it kills the old server/tunnel and starts fresh.

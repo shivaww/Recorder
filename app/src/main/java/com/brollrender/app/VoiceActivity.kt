@@ -29,7 +29,7 @@ import java.io.File
 import kotlin.math.roundToInt
 
 /**
- * Voice Studio — Qwen3-TTS client for the voice server (voice/run.sh on a
+ * Voice Studio — Qwen3-TTS client for the voice server (qwen3tts/run.sh on a
  * Kaggle GPU notebook). Mirrors the tested tmp/qwen.html flow: custom voice,
  * voice cloning, voice design; job polling; WAV export to Music/NexonStudio.
  * Programmatic UI, same console aesthetic as MainActivity.
@@ -54,7 +54,7 @@ class VoiceActivity : Activity() {
         const val BOOTSTRAP_CMD =
             "!rm -rf /kaggle/working/V && git clone --depth 1 " +
                 "https://github.com/shivaww/Recorder.git /kaggle/working/V && " +
-                "cd /kaggle/working/V/voice && bash run.sh"
+                "cd /kaggle/working/V/qwen3tts && bash run.sh"
     }
 
     private lateinit var securePrefs: SecurePrefs

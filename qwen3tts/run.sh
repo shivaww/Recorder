@@ -3,7 +3,7 @@
 #  NEXON STUDIO — VOICE SERVER ONE-COMMAND LAUNCHER (Kaggle GPU notebook)
 #
 #  Paste ONE line into a Kaggle cell (Accelerator: GPU required):
-#    !rm -rf /kaggle/working/V && git clone --depth 1 https://github.com/shivaww/Recorder.git /kaggle/working/V && cd /kaggle/working/V/voice && bash run.sh
+#    !rm -rf /kaggle/working/V && git clone --depth 1 https://github.com/shivaww/Recorder.git /kaggle/working/V && cd /kaggle/working/V/qwen3tts && bash run.sh
 #
 #  Safe to re-run: kills the previous server/tunnel and starts fresh.
 #    1. Installs dependencies (flask, flask-cors, soundfile, qwen-tts)

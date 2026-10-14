@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression test for voice/server.py ITN + pause helpers (no torch needed).
+"""Regression test for qwen3tts/server.py ITN + pause helpers (no torch needed).
 
 Splices the pure-Python helper spans out of server.py by marker strings and
 runs the transcript report's failing sentences through normalize_text.
@@ -8,7 +8,7 @@ import os
 import re
 import sys
 
-SRC = os.path.join(os.path.dirname(__file__), "..", "voice", "server.py")
+SRC = os.path.join(os.path.dirname(__file__), "..", "qwen3tts", "server.py")
 src = open(SRC, encoding="utf-8").read().splitlines()
 
 

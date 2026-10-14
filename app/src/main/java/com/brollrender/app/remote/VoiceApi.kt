@@ -5,8 +5,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Network layer for the Qwen3-TTS voice server (voice/server.py, launched by
- * voice/run.sh on a Kaggle GPU notebook). Same style as RemoteApi:
+ * Network layer for the Qwen3-TTS voice server (qwen3tts/server.py, launched by
+ * qwen3tts/run.sh on a Kaggle GPU notebook). Same style as RemoteApi:
  * HttpURLConnection, manual multipart, regex JSON parsing — zero deps.
  */
 class VoiceApi(private val baseUrl: String) {
