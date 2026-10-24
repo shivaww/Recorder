@@ -7,6 +7,7 @@ import threading
 import urllib.request
 from io import BytesIO
 
+import media
 from media import process_media
 
 MAX_BYTES = 20 * 1024 * 1024
@@ -32,22 +33,23 @@ def _has_alpha(img):
     return sum(hist[:250]) > 0.01 * img.width * img.height
 
 
-def _download(url):
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urllib.request.urlopen(req, timeout=25) as r:
-        data = r.read(MAX_BYTES + 1)
-        ctype = r.headers.get('Content-Type', '')
-    if len(data) > MAX_BYTES:
-        raise ValueError('image too large')
-    return data, ctype
+def _download(url, out_dir):
+    # A direct image URL downloads as-is; a web page is searched for its real image.
+    tmp = os.path.join(out_dir, hashlib.sha1(url.encode()).hexdigest()[:12] + '.isrc')
+    try:
+        real = media._download(url, MAX_BYTES, tmp, 'image')
+        with open(tmp, 'rb') as f:
+            return f.read(), real
+    finally:
+        media._rm(tmp)
 
 
 def _fetch_one(url, out_dir):
     from PIL import Image
     key = hashlib.sha1(url.encode()).hexdigest()[:12]
-    data, ctype = _download(url)
-    head = data.lstrip()[:300].lower()
-    if 'svg' in ctype or b'<svg' in head or url.lower().split('?')[0].endswith('.svg'):
+    data, real = _download(url, out_dir)
+    head = data.lstrip()[:1024].lower()
+    if b'<svg' in head or real.lower().split('?')[0].endswith('.svg'):
         name = key + '.svg'
         with open(os.path.join(out_dir, name), 'wb') as f:
             f.write(data)

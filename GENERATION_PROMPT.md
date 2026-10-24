@@ -85,7 +85,7 @@ All motion is deterministic, scrub-safe, and timed exactly to spoken syllables. 
 
 SFX must be **sparse and diegetic** — reserved for genuine narrative beats (a reveal, an impact, a consequential transition), not every micro-motion or element entrance. As a guideline, most 45–75s scenes carry roughly 3–8 SFX events total, not one per animation. Silence between beats is fine and often stronger than constant scoring.
 
-Sound effects are real audio files supplied as direct URLs (see PART 4C, Step 1). The render server downloads each URL, converts it, and mixes it into the video starting at time `t`. There are no built-in sound IDs: an event without a usable `url` is skipped. Place this block right before `</body>`:
+Sound effects are real audio files supplied as URLs, either a direct file or a page that hosts it (see PART 4C, Step 1). The render server downloads each URL, converts it, and mixes it into the video starting at time `t`. There are no built-in sound IDs: an event without a usable `url` is skipped. Place this block right before `</body>`:
 
 ```html
 <script type="application/json" id="sfx">
@@ -199,23 +199,27 @@ stays exactly as written in Parts 1-4.
   still applies at the same physical proportion.
 ======== PART 4C - REAL ASSETS (IMAGES, VIDEO CLIPS, SOUND EFFECTS) ========
 
-When the transcript names a real brand, product, person, or object that reads best as its actual image (e.g. the Claude logo), use a real image instead of redrawing it. When a real moving clip (footage, a product demo, a screen recording) or a real sound effect would carry a beat better than anything drawn, use that too. All three are supplied by the user as direct URLs and are never invented. The render server downloads each one before rendering: images get their background removed, videos are re-encoded and stepped frame by frame, sound effects are converted and mixed in.
+When the transcript names a real brand, product, person, or object that reads best as its actual image (e.g. the Claude logo), use a real image instead of redrawing it. When a real moving clip (footage, a product demo, a screen recording) or a real sound effect would carry a beat better than anything drawn, use that too. All three are supplied by the user as URLs (a direct file or a page that hosts it) and are never invented. The render server downloads each one before rendering: images get their background removed, videos are re-encoded and stepped frame by frame, sound effects are converted and mixed in.
 
-**Step 1 - get URLs first.** If the scene needs no real assets (no images, clips, or sound effects), skip this step. Otherwise, if the asset URLs are not already in the request, print the CREATIVE SYNTHESIS and the BEAT TABLE (SFX column = a short label of the sound, such as "deep impact" or "soft click"), then STOP and output only the block below plus this line: "Paste this into Grok. When it replies, paste its full answer back to me." Do not write HTML until the URLs arrive. Never guess or invent a URL. When they arrive, continue from deliverable item 3 (MANIFEST) without reprinting items 1 and 2.
+**Step 1 - get URLs first.** If the scene needs no real assets (no images, clips, or sound effects), skip this step. Otherwise, if the asset URLs are not already in the request, print the CREATIVE SYNTHESIS and the BEAT TABLE (SFX column = a short label of the sound, such as "deep impact" or "soft click"), then STOP and output only the block below plus this line: "Paste this into Grok. When it replies, check the links and paste back the ones you want to use." Do not write HTML until the URLs arrive. Never guess or invent a URL. When they arrive, continue from deliverable item 3 (MANIFEST) without reprinting items 1 and 2.
+
+Query rules: each query is 3 to 6 plain words naming the subject only, such as "Anthropic official logo", "Claude launch promo video" or "whoosh sound effect". No lighting, lens, style, mood, or duration words. A close match is fine. Never ask Grok to open or verify anything.
 
 ```json
 {
   "agent": "grok",
   "q": [
-    "IMAGE: direct https image URL (ends in .png, .webp, .jpg or .svg, publicly hotlinkable, high resolution, subject clearly visible) for: <subject>",
-    "VIDEO: direct https video file URL (ends in .mp4, .webm or .mov, publicly hotlinkable, not a YouTube/Vimeo/page link, 1080p or smaller, under 100 MB, no watermark, landscape) for: <subject and the action shown>",
-    "SFX: direct https audio file URL (ends in .mp3, .wav, .ogg or .m4a, royalty-free, no login, not a page with an embedded player, 0.2 to 3 seconds long) for: <sound description>"
+    "IMAGE: <brand or subject> official logo",
+    "VIDEO: <subject> promo video",
+    "SFX: <sound> sound effect"
   ],
-  "reply_format": "One line per asset, no commentary: IMAGE | <subject> | <url>, VIDEO | <subject> | <url> | <seconds if known>, SFX | <sound> | <url> | <seconds if known>. If nothing usable exists, write NONE | <subject> | not found. Only direct file URLs; verify each opens as the file itself."
+  "reply_format": "One line per URL, no commentary: IMAGE | <subject> | <url>, VIDEO | <subject> | <url>, SFX | <sound> | <url>. Give 2 or 3 URLs per query when possible, best match first. A direct file link (.png, .svg, .jpg, .mp4, .webm, .mp3, .wav) is best, but an official page or a stock-site page that hosts the file is fine. Any site is fine: company newsroom and press pages, Mixkit, Pexels, Pixabay. Avoid YouTube and Vimeo links. Do not open or verify the links. If nothing close exists, give your closest guess and say so in a few words."
 }
 ```
 
-Delete the example lines for asset types the scene does not use. One line per distinct image subject, one per distinct clip (at most 3), one per distinct sound (at most 8). Never request the same item twice. For images, ask for the official full-color mark on a transparent or plain background; if the mark is mostly dark and the scene is dark (or mostly white on a light scene), ask for the light/white variant instead.
+Delete the example lines for asset types the scene does not use. One line per distinct image subject, at most 2 clips, at most 5 sounds. Never request the same item twice. For a mostly dark mark on a dark scene (or a mostly white mark on a light scene), add "white version" (or "black version") to the image query.
+
+**Step 1b - using the reply.** The user pastes back the URLs they chose. Each may be a direct file or a page that hosts it. Use it exactly as given in `src` or the event `url`, never rewritten or shortened; the render server resolves pages to the real file. An item with no URL is skipped and built from the scene's own visuals.
 
 **Step 2 - markup.** For every supplied image:
 - Write `<img data-nobg src="https://..." alt="...">`. The `data-nobg` attribute is mandatory: it tells the server to cut out the background. Never attempt background removal in CSS.

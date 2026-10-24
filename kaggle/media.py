@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import urllib.parse
 import urllib.request
 
 MAX_VIDEO_BYTES = 100 * 1024 * 1024
@@ -41,18 +42,101 @@ def _is_remote(u):
     return isinstance(u, str) and u.lower().startswith(('http://', 'https://'))
 
 
-def _download(url, max_bytes, dest):
+MAX_PAGE_BYTES = 2 * 1024 * 1024
+MAX_CANDIDATES = 8
+MEDIA_EXT = {
+    'video': ('.mp4', '.webm', '.mov', '.m4v'),
+    'audio': ('.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac'),
+    'image': ('.png', '.webp', '.jpg', '.jpeg', '.svg'),
+}
+OG_KEYS = {
+    'video': ('video', 'video:url', 'video:secure_url'),
+    'audio': ('audio', 'audio:url', 'audio:secure_url'),
+    'image': ('image', 'image:url', 'image:secure_url'),
+}
+HTML_SNIFF = re.compile(rb'<(?:!doctype\s+html|html)\b', re.I)
+CONTENT_URL = re.compile(r'\x22contentUrl\x22\s*:\s*\x22([^\x22]+)\x22')
+EMBED_URL = re.compile(r'\x22embedUrl\x22\s*:\s*\x22([^\x22]+)\x22')
+META_TAG = re.compile(r'<meta\b[^>]*>', re.I)
+META_KEY = re.compile(r'\b(?:property|name)\s*=\s*[\x22\x27]og:([a-z:_]+)[\x22\x27]', re.I)
+META_VAL = re.compile(r'\bcontent\s*=\s*([\x22\x27])(.*?)\1', re.I | re.S)
+MEDIA_TAG = re.compile(r'<(?:source|video|audio)\b[^>]*>', re.I)
+BARE_URL = re.compile(r'https?://[^\s\x22\x27<>\x5c)]+')
+
+
+def _get(url, max_bytes, dest):
+    # Streams url to dest. If the body is an HTML page, returns (text, final_url) and writes nothing.
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    size = 0
-    with urllib.request.urlopen(req, timeout=30) as r, open(dest, 'wb') as f:
-        while True:
-            chunk = r.read(1 << 20)
-            if not chunk:
-                break
-            size += len(chunk)
-            if size > max_bytes:
-                raise ValueError('file too large')
-            f.write(chunk)
+    with urllib.request.urlopen(req, timeout=30) as r:
+        ctype = (r.headers.get('Content-Type') or '').lower()
+        first = r.read(1 << 20)
+        if 'html' in ctype or HTML_SNIFF.search(first[:1024]):
+            body = first + r.read(MAX_PAGE_BYTES)
+            return body.decode('utf-8', 'replace'), r.geturl()
+        size = len(first)
+        if size > max_bytes:
+            raise ValueError('file too large')
+        with open(dest, 'wb') as f:
+            f.write(first)
+            while True:
+                chunk = r.read(1 << 20)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > max_bytes:
+                    raise ValueError('file too large')
+                f.write(chunk)
+    return None
+
+
+def _candidates(page, base, kind):
+    # Real media URLs found on a web page, best first.
+    text = page.replace(chr(92) + '/', '/')
+    found = []
+
+    def add(u):
+        u = u.strip().rstrip('.,;').replace('&amp;', '&')
+        if not u or u.startswith(('data:', 'blob:', 'javascript:', '#')):
+            return
+        u = urllib.parse.urljoin(base, u)
+        if _is_remote(u) and u not in found:
+            found.append(u)
+
+    for rx in (CONTENT_URL, EMBED_URL):
+        for m in rx.finditer(text):
+            add(m.group(1))
+    keys = OG_KEYS[kind]
+    for tag in META_TAG.findall(text):
+        k, v = META_KEY.search(tag), META_VAL.search(tag)
+        if k and v and k.group(1).lower() in keys:
+            add(v.group(2))
+    for tag in MEDIA_TAG.findall(text):
+        m = SRC_ATTR.search(tag)
+        if m:
+            add(m.group(2))
+    exts = MEDIA_EXT[kind]
+    for m in BARE_URL.finditer(text):
+        u = m.group(0).rstrip('.,;')
+        if urllib.parse.urlparse(u).path.lower().endswith(exts):
+            add(u)
+    return found[:MAX_CANDIDATES]
+
+
+def _download(url, max_bytes, dest, kind):
+    # Direct file URLs download as-is. A web page is searched for the real file, one level deep.
+    page = _get(url, max_bytes, dest)
+    if page is None:
+        return url
+    cands = _candidates(page[0], page[1], kind)
+    last = ''
+    for u in cands:
+        try:
+            if _get(u, max_bytes, dest) is None:
+                return u
+        except Exception as e:
+            last = '%s: %s' % (type(e).__name__, e)
+    raise ValueError('web page has no usable %s file (%d links tried%s)'
+                     % (kind, len(cands), '; last ' + last if last else ''))
 
 
 def _ffmpeg(args, timeout):
@@ -69,7 +153,7 @@ def _fetch_video(url, out_dir):
     name = key + '.webm'
     err = None
     try:
-        _download(url, MAX_VIDEO_BYTES, src)
+        _download(url, MAX_VIDEO_BYTES, src, 'video')
         for codec in (VP9, VP8):
             try:
                 _ffmpeg(['-i', src, '-t', str(MAX_VIDEO_SEC), '-an',
@@ -89,7 +173,7 @@ def _fetch_sfx(url, out_dir):
     src = os.path.join(out_dir, key + '.asrc')
     name = key + '.wav'
     try:
-        _download(url, MAX_AUDIO_BYTES, src)
+        _download(url, MAX_AUDIO_BYTES, src, 'audio')
         _ffmpeg(['-i', src, '-t', str(MAX_SFX_SEC), '-vn', '-ar', str(SAMPLE_RATE),
                  '-ac', '1', '-c:a', 'pcm_s16le', os.path.join(out_dir, name)], 120)
     finally:
