@@ -75,6 +75,8 @@ def install_deps():
         print("  -> NVENC: available")
     else:
         print("  -> WARNING: h264_nvenc not found, will use libx264 fallback")
+    if "libvpx-vp9" not in r.stdout:
+        print("  -> WARNING: libvpx-vp9 missing in ffmpeg, video assets will fail to transcode")
 
     print("  -> installing Vulkan + NVIDIA GL libs (needed for GPU Chromium)...", flush=True)
     run_live(["apt-get", "update", "-qq"])

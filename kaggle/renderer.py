@@ -97,7 +97,7 @@ def extract_sfx_manifest(page):
             const evs = Array.isArray(d) ? d : (d.events || []);
             return {events: evs.map(e => ({
                 t: +e.t,
-                id: String(e.id || 'tick'),
+                url: String(e.url || ''),
                 gain: Math.min(1, Math.max(0, +e.gain || 0.7))
             }))};
         } catch(err) { return {events: []}; }
@@ -198,6 +198,12 @@ def _prep_page(browser, html_path, width, height, enhance):
     except PWTimeout:
         pass
     try:
+        page.wait_for_function(
+            "() => [...document.querySelectorAll('video')].every(v => v.readyState >= 2)",
+            timeout=20000)
+    except PWTimeout:
+        print("[render] WARNING: video(s) not ready", flush=True)
+    try:
         broken = page.evaluate("""() => {
             const bad = [];
             for (const img of document.querySelectorAll('img')) {
@@ -252,11 +258,32 @@ def _render_slice(html_path, width, height, enhance, clip, frames_dir, fps,
                         raise RenderError("CANCELLED")
                 try:
                     page.evaluate(
-                        """(t) => {
+                        """async (t) => {
                             if (window.__broll && window.__broll.seek) window.__broll.seek(t / 1000);
                             for (const a of document.getAnimations()) {
                                 a.pause();
                                 a.currentTime = t;
+                            }
+                            const vids = [...document.querySelectorAll('video')];
+                            if (vids.length) {
+                                await Promise.all(vids.map(v => new Promise(res => {
+                                    const st = parseFloat(v.dataset.start) || 0;
+                                    const vt = Math.max(0, t / 1000 - st);
+                                    const d = v.duration;
+                                    let tgt = vt;
+                                    if (isFinite(d) && d > 0) {
+                                        tgt = ('loop' in v.dataset) ? vt % d : Math.min(vt, Math.max(0, d - 0.05));
+                                    }
+                                    if (Math.abs(v.currentTime - tgt) < 0.001) return res();
+                                    const done = () => { v.removeEventListener('seeked', done); res(); };
+                                    v.addEventListener('seeked', done);
+                                    v.currentTime = tgt;
+                                    setTimeout(done, 3000);
+                                })));
+                                await new Promise(r => {
+                                    requestAnimationFrame(() => requestAnimationFrame(r));
+                                    setTimeout(r, 200);
+                                });
                             }
                             void document.body.offsetHeight;
                         }""",

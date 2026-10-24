@@ -1,10 +1,13 @@
 # assets.py: download <img data-nobg> images, strip backgrounds, rewrite to local files.
+# Remote <video> and #sfx audio URLs are handled in media.py (called below).
 import hashlib
 import os
 import re
 import threading
 import urllib.request
 from io import BytesIO
+
+from media import process_media
 
 MAX_BYTES = 20 * 1024 * 1024
 IMG_TAG = re.compile(r"<img\b[^>]*\bdata-nobg\b[^>]*>", re.I)
@@ -69,8 +72,6 @@ def process_assets(html_path, job_dir):
         html = f.read()
     tags = IMG_TAG.findall(html)
     stats = {'found': len(tags), 'ok': 0, 'failed': []}
-    if not tags:
-        return stats
     out_dir = os.path.join(job_dir, 'assets')
     os.makedirs(out_dir, exist_ok=True)
     cache = {}
@@ -92,7 +93,8 @@ def process_assets(html_path, job_dir):
         return tag[:sm.start()] + 'src="assets/' + name + '"' + tag[sm.end():]
 
     html = IMG_TAG.sub(fix, html)
-    if stats['ok']:
+    html = process_media(html, out_dir, stats)
+    if stats['ok'] or stats['video_ok'] or stats['sfx_ok']:
         with open(html_path, 'w', encoding='utf-8') as f:
             f.write(html)
     return stats

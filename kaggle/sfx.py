@@ -1,75 +1,36 @@
-"""sfx.py — SFX synthesis, ambience beds, and audio mixing.
+"""sfx.py: ambience beds and audio mixing.
 
-Synthesizes declarative audio events from the HTML's #sfx JSON manifest
-and ambience beds from #ambience, mixes them into a WAV for ffmpeg muxing.
+Mixes the SFX clips declared in the HTML's #sfx JSON manifest (each url was
+downloaded and converted to a local WAV by media.py) with the synthesized
+#ambience bed, and writes one WAV for ffmpeg muxing.
 """
+import os
 import wave
 import numpy as np
 
 from config import SAMPLE_RATE, MASTER_GAIN
 
 
-# ─── SFX SYNTHESIS ────────────────────────────────────────────────────────────
+# --- SFX CLIPS (downloaded WAVs) ---------------------------------------------
 
-def synth_slam(n):
-    t = np.arange(n) / SAMPLE_RATE
-    nz = np.random.RandomState(11).rand(n) * 2 - 1
-    f = 140.0 * np.exp(-t * 22.0) + 42.0
-    ph = np.cumsum(2 * np.pi * f / SAMPLE_RATE)
-    return np.sin(ph) * np.exp(-t * 14.0) + nz * np.exp(-t * 90.0) * 0.5
+def load_clip(rel_path, base_dir):
+    """Load a local 16-bit mono WAV at SAMPLE_RATE as float32 in [-1, 1].
 
-def synth_boom(n):
-    t = np.arange(n) / SAMPLE_RATE
-    nz = np.random.RandomState(37).rand(n) * 2 - 1
-    f = 70.0 * np.exp(-t * 8.0) + 28.0
-    ph = np.cumsum(2 * np.pi * f / SAMPLE_RATE)
-    return np.sin(ph) * np.exp(-t * 6.0) + nz * np.exp(-t * 20.0) * 0.15
-
-def synth_whoosh(n):
-    nz = np.random.RandomState(23).rand(n) * 2 - 1
-    p = np.arange(n) / n
-    a = (0.04 + 0.46 * p)
-    lp = np.zeros(n)
-    for i in range(1, n):
-        lp[i] = lp[i-1] + a[i] * (nz[i] - lp[i-1])
-    return lp * np.sin(np.pi * p) * 0.8
-
-def synth_tick(n):
-    t = np.arange(n) / SAMPLE_RATE
-    nz = np.random.RandomState(31).rand(n) * 2 - 1
-    return nz * np.exp(-t * 400.0) * 0.9
-
-def synth_rise(n):
-    p = np.arange(n) / n
-    f = 180.0 * (1400.0 / 180.0) ** p
-    ph = np.cumsum(2 * np.pi * f / SAMPLE_RATE)
-    trem = 0.7 + 0.3 * np.sin(2 * np.pi * 7.0 * p)
-    return np.sin(ph) * trem * (0.15 + 0.55 * p)
-
-def synth_ding(n):
-    t = np.arange(n) / SAMPLE_RATE
-    d = np.exp(-t * 8.0)
-    return (np.sin(2*np.pi*1318.0*t)*0.6 + np.sin(2*np.pi*1976.0*t)*0.25) * d
-
-def synth_pop(n):
-    p = np.arange(n) / n
-    f = 260.0 + 640.0 * p
-    ph = np.cumsum(2 * np.pi * f / SAMPLE_RATE)
-    return np.sin(ph) * (1.0 - p) * 0.8
-
-def synth_glitch(n):
-    t = np.arange(n) / SAMPLE_RATE
-    nz = np.random.RandomState(47).rand(n) * 2 - 1
-    gate = (np.sin(2 * np.pi * 60.0 * t) > 0).astype(float)
-    return nz * gate * np.exp(-t * 12.0) * 0.8
-
-def synth_sound(sid, n):
-    dispatch = {
-        "slam": synth_slam, "boom": synth_boom, "whoosh": synth_whoosh,
-        "rise": synth_rise, "ding": synth_ding, "pop": synth_pop,
-        "glitch": synth_glitch,
-    }
-    return dispatch.get(sid, synth_tick)(n)
+    Returns None if the path escapes base_dir or the file is missing/invalid.
+    """
+    root = os.path.realpath(base_dir)
+    path = os.path.realpath(os.path.join(root, rel_path))
+    if not path.startswith(root + os.sep) or not os.path.isfile(path):
+        return None
+    try:
+        with wave.open(path, 'rb') as wf:
+            if (wf.getnchannels() != 1 or wf.getsampwidth() != 2
+                    or wf.getframerate() != SAMPLE_RATE):
+                return None
+            raw = wf.readframes(wf.getnframes())
+    except (wave.Error, EOFError):
+        return None
+    return np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
 
 
 # ─── AMBIENCE BEDS ────────────────────────────────────────────────────────────
@@ -121,14 +82,15 @@ def get_ambience(typ, n):
 
 # ─── AUDIO MIX ────────────────────────────────────────────────────────────────
 
-def mix_audio(events, ambience_type, duration_sec, out_path):
-    """Synthesize SFX events + ambience bed into a WAV file.
+def mix_audio(events, ambience_type, duration_sec, out_path, base_dir):
+    """Mix SFX clips + ambience bed into a WAV file.
 
     Args:
-        events: list of {"t": seconds, "id": sound_id, "gain": 0-1}
+        events: list of {"t": seconds, "url": "assets/<key>.wav", "gain": 0-1}
         ambience_type: "drone"|"pulse"|"air"|"tension" or None
         duration_sec: total timeline duration
         out_path: where to write the WAV
+        base_dir: job directory that the event urls are relative to
     """
     total = int(duration_sec * SAMPLE_RATE) + SAMPLE_RATE // 4
     acc = np.zeros(total, dtype=np.float32)
@@ -137,17 +99,26 @@ def mix_audio(events, ambience_type, duration_sec, out_path):
         bed = get_ambience(ambience_type, int(duration_sec * SAMPLE_RATE))
         acc[:len(bed)] += bed * 0.25
 
+    clips = {}
     for e in events:
-        t_sec = e.get("t", 0)
-        eid = e.get("id", "tick")
-        gain = e.get("gain", 0.7)
-        n = int(0.8 * SAMPLE_RATE)
-        buf = synth_sound(eid, n)
+        url = e.get("url")
+        if not url:
+            print("[sfx] skipped event without url: %r" % (e,), flush=True)
+            continue
+        if url not in clips:
+            clips[url] = load_clip(url, base_dir)
+        buf = clips[url]
+        if buf is None:
+            print("[sfx] skipped unusable clip: %s" % url[:80], flush=True)
+            continue
+        t_sec = e.get("t")
+        if not isinstance(t_sec, (int, float)):
+            continue
         start = int(t_sec * SAMPLE_RATE)
         if start < 0 or start >= total:
             continue
         end = min(start + len(buf), total)
-        acc[start:end] += buf[:end-start] * gain
+        acc[start:end] += buf[:end - start] * e.get("gain", 0.7)
 
     acc = acc / (1.0 + np.abs(acc))
     acc = (acc * 32767.0 * MASTER_GAIN).astype(np.int16)

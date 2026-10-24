@@ -46,6 +46,7 @@ RENDER → DONE. No screen recording, no editor crop, no resampling blur.
   WebView configured with allowFileAccessFromFileURLs + universal access.
 - **Video scrubbing**: `<video>` elements seek via `video.currentTime = t`
   inside `__broll.seek(t)`. Never .play(). mediaPlaybackRequiresUserGesture=false.
+- **Kaggle farm video**: remote `<video src="https://...">` is downloaded and re-encoded to silent WebM (kaggle/media.py). The renderer seeks each video to (t - `data-start`) before every frame; `data-loop` repeats it, otherwise it holds the last frame.
 
 ## Fonts
 
@@ -55,8 +56,7 @@ Any pairing works. FONTS_KICK re-inserts links + explicit document.fonts.load().
 
 ## Audio pipeline
 
-- **SFX**: `#sfx` JSON block → 8 synthesized sounds (slam boom whoosh tick
-  rise ding pop glitch) → PCM mix → AAC encode → muxed on same master clock.
+- **SFX**: `#sfx` JSON block, events `{t, url, gain}`. Kaggle farm: each url is downloaded and converted to 44.1k mono WAV (kaggle/media.py), mixed at `t` (kaggle/sfx.py), then AAC muxed on the same master clock. The local Android renderer (Sfx.kt) still reads legacy `id` events and has not been updated for `url`.
 - **Ambience**: `#ambience` JSON block → synthesized bed (drone/pulse/air/
   tension) → fade in 1s, fade out 2s → mixed under SFX at declared gain.
 - Master gain 0.45 (-7 dBFS). Loudness multiplier: low=0.5, normal=1.0, high=1.6.

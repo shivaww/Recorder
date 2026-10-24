@@ -85,15 +85,15 @@ All motion is deterministic, scrub-safe, and timed exactly to spoken syllables. 
 
 SFX must be **sparse and diegetic** — reserved for genuine narrative beats (a reveal, an impact, a consequential transition), not every micro-motion or element entrance. As a guideline, most 45–75s scenes carry roughly 3–8 SFX events total, not one per animation. Silence between beats is fine and often stronger than constant scoring.
 
-Sound is declared as data and baked into the video render. Place this block right before `</body>`:
+Sound effects are real audio files supplied as direct URLs (see PART 4C, Step 1). The render server downloads each URL, converts it, and mixes it into the video starting at time `t`. There are no built-in sound IDs: an event without a usable `url` is skipped. Place this block right before `</body>`:
 
 ```html
 <script type="application/json" id="sfx">
 {
   "loudness": "normal",
   "events": [
-    {"t": 1.4, "id": "pop", "gain": 0.5},
-    {"t": 8.1, "id": "slam", "gain": 0.7}
+    {"t": 1.4, "url": "<exact URL from Grok>", "gain": 0.5},
+    {"t": 8.1, "url": "<exact URL from Grok>", "gain": 0.7}
   ]
 }
 </script>
@@ -102,8 +102,12 @@ Sound is declared as data and baked into the video render. Place this block righ
 </script>
 ```
 
-Allowed SFX IDs: `slam, boom, whoosh, tick, pop, glitch, ding, type`.
-Ambience types: `drone, pulse, air, tension`.
+- `t`: scene time in seconds when the clip STARTS playing. If the sound has a lead-in before its hit, set `t` earlier so the hit lands on the beat.
+- `url`: character-for-character a URL Grok supplied. Never guess, invent, or edit one. Reuse the same string when the same sound repeats.
+- `gain`: 0 to 1 (default 0.7).
+- No URL for a beat: leave that beat silent. Never substitute another sound.
+
+Ambience types: `drone, pulse, air, tension` (built in, no URL needed).
 
 ════════ PART 4 — HARD RENDERER CONTRACT ════════
 
@@ -193,23 +197,25 @@ stays exactly as written in Parts 1-4.
   and every anti-collision rule remain in force unchanged.
 - `cqh`/`cqw` units self-adapt to the tall container - the 2.2cqh minimum
   still applies at the same physical proportion.
-======== PART 4C - REAL IMAGES (LOGOS, PRODUCTS, PHOTOS) ========
+======== PART 4C - REAL ASSETS (IMAGES, VIDEO CLIPS, SOUND EFFECTS) ========
 
-When the transcript names a real brand, product, person, or object that reads best as its actual image (e.g. the Claude logo), use a real image instead of redrawing it. The render server downloads each flagged image and removes its background automatically.
+When the transcript names a real brand, product, person, or object that reads best as its actual image (e.g. the Claude logo), use a real image instead of redrawing it. When a real moving clip (footage, a product demo, a screen recording) or a real sound effect would carry a beat better than anything drawn, use that too. All three are supplied by the user as direct URLs and are never invented. The render server downloads each one before rendering: images get their background removed, videos are re-encoded and stepped frame by frame, sound effects are converted and mixed in.
 
-**Step 1 - get URLs first.** If the image URLs are not already in the request, print the CREATIVE SYNTHESIS, then STOP and output only the block below plus this line: "Paste this into Grok. When it replies, paste its full answer back to me." Do not write HTML until the URLs arrive. Never guess or invent a URL.
+**Step 1 - get URLs first.** If the scene needs no real assets (no images, clips, or sound effects), skip this step. Otherwise, if the asset URLs are not already in the request, print the CREATIVE SYNTHESIS and the BEAT TABLE (SFX column = a short label of the sound, such as "deep impact" or "soft click"), then STOP and output only the block below plus this line: "Paste this into Grok. When it replies, paste its full answer back to me." Do not write HTML until the URLs arrive. Never guess or invent a URL. When they arrive, continue from deliverable item 3 (MANIFEST) without reprinting items 1 and 2.
 
 ```json
 {
   "agent": "grok",
   "q": [
-    "Direct https image URL (ends in .png, .webp, .jpg or .svg, publicly hotlinkable, high resolution, subject clearly visible) for: <subject 1>",
-    "Direct https image URL (same requirements) for: <subject 2>"
-  ]
+    "IMAGE: direct https image URL (ends in .png, .webp, .jpg or .svg, publicly hotlinkable, high resolution, subject clearly visible) for: <subject>",
+    "VIDEO: direct https video file URL (ends in .mp4, .webm or .mov, publicly hotlinkable, not a YouTube/Vimeo/page link, 1080p or smaller, under 100 MB, no watermark, landscape) for: <subject and the action shown>",
+    "SFX: direct https audio file URL (ends in .mp3, .wav, .ogg or .m4a, royalty-free, no login, not a page with an embedded player, 0.2 to 3 seconds long) for: <sound description>"
+  ],
+  "reply_format": "One line per asset, no commentary: IMAGE | <subject> | <url>, VIDEO | <subject> | <url> | <seconds if known>, SFX | <sound> | <url> | <seconds if known>. If nothing usable exists, write NONE | <subject> | not found. Only direct file URLs; verify each opens as the file itself."
 }
 ```
 
-One query per distinct subject. Request only the images the scene truly needs, and never request the same subject twice. Ask for the official full-color mark on a transparent or plain background. If the mark is mostly dark and the scene is dark (or mostly white on a light scene), ask for the light/white variant instead.
+Delete the example lines for asset types the scene does not use. One line per distinct image subject, one per distinct clip (at most 3), one per distinct sound (at most 8). Never request the same item twice. For images, ask for the official full-color mark on a transparent or plain background; if the mark is mostly dark and the scene is dark (or mostly white on a light scene), ask for the light/white variant instead.
 
 **Step 2 - markup.** For every supplied image:
 - Write `<img data-nobg src="https://..." alt="...">`. The `data-nobg` attribute is mandatory: it tells the server to cut out the background. Never attempt background removal in CSS.
@@ -221,6 +227,17 @@ One query per distinct subject. Request only the images the scene truly needs, a
 - Already-transparent images and SVGs are kept as they are.
 - If the same logo appears in several beats, reuse the same URL string.
 - If no usable URL is available, build the subject as inline SVG instead.
+
+**Step 2b - video markup.** For every supplied video:
+- Write `<video src="https://..." muted playsinline preload="auto" data-start="S"></video>` with the exact URL given. Add `data-loop` to repeat a short clip; omit it to hold the last frame at the end.
+- `data-start` is the scene time in seconds when the clip's first frame should appear. The server pauses every video and, before each frame, seeks it to (scene time - data-start). Do not use `autoplay`, `loop`, `.play()`, or your own seek code. Audio inside the file is discarded.
+- Reveal it at that same moment with opacity (animation-delay = data-start). Before data-start it shows its first frame, so keep it hidden until then.
+- Videos are opaque rectangles: background removal does not apply and `data-nobg` is never used. Size with `cqh`/`cqw`, explicit width and height, `object-fit: cover` for a full-bleed backdrop or `contain` for an inset panel.
+- Full-bleed backdrop: dim it with an overlay so captions and text stay legible. Inset panel: ZONE A or the single hero beat only, never in the bottom 22% caption zone, never over ZONE B, 4cqh safe margin from every frame edge.
+- At most two videos visible at once. Only the first 45 seconds of a clip are used.
+- If no usable video URL is available, skip the clip and build the beat from the scene's own visuals.
+
+**Step 2c - sound effect markup.** Every supplied SFX URL goes into the `#sfx` block (see SOUND DESIGN), never into the page body. Match each event's `t` to its BEAT TABLE row.
 
 **Step 3 - WHEN a logo appears.**
 - Only for brands or products named in this transcript span. No decorative, implied, or filler logos.
@@ -245,7 +262,7 @@ One query per distinct subject. Request only the images the scene truly needs, a
 ═══ PART 5 — DELIVERABLE FORMAT ════════
 
 1. **CREATIVE SYNTHESIS** — chosen visual vehicle (confirmed unused this session), aesthetic tone, target duration, Continuity Carry-Forward statement, Google font pairing, semantic palette, artifact plan.
-2. **BEAT TABLE:** `Timestamp | Spoken Beat | Visual Stage Event | Software Artifact Action | SFX ID`
-3. **MANIFEST:** Duration (matching the `#duration` JSON exactly), Chosen Visual Vehicle, Active Window Count, SFX Count, Logo Count (equal to the number of `data-nobg` images).
+2. **BEAT TABLE:** `Timestamp | Spoken Beat | Visual Stage Event | Software Artifact Action | SFX` (SFX = short label of the sound, or `none`)
+3. **MANIFEST:** Duration (matching the `#duration` JSON exactly), Chosen Visual Vehicle, Active Window Count, SFX Count (equal to the number of `#sfx` events), Logo Count (equal to the number of `data-nobg` images), Video Count (equal to the number of `<video>` elements).
 4. **THE COMPLETE, SELF-CONTAINED HTML FILE** (inline CSS + inline SVG/Canvas + JSON sound + `#duration` block).
 5. **RENDER VERIFICATION:** timecode check for UI appearances, audio sync, and confirmation the `#duration` block matches the manifest, plus a logo check: each logo's entrance time against its spoken word, and a note that no logo sits in the caption zone or the gutter.
