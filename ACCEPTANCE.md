@@ -27,8 +27,8 @@ Run against any HTML file (conforming files auto-detect the frame; non-conformin
 | 14 | ENHANCE ON vs OFF: first frame visibly more contrast/saturation ON; frame0.png still matches the video | | |
 | 15 | No screen capture: let a notification arrive mid-render (or take a screenshot) - none of it appears in the output video | | |
 | 16 | Non-conforming page opens AUTO-FITTED: content fills the amber brackets (status line shows `MANUAL · AUTO-FITTED`), matching a manual screen-recording's framing - NOT small in a dark void | | |
-| 17 | SFX variant (`temporary_sfx.html`): MP4 has an audible audio track; the slam lands exactly with the 16.2s MEGA-SLAM (audio/video sync) | | |
-| 18 | Fixture 2 (`temporary2.html`, prompt-verbatim full-window .fit): PREVIEW shows AUTO `LOCKED`; at t=16.2s the white flash + double rings + chromatic ghosts + "PROOF?" land on ONE frame with the slam sound; odometer rolls, clip-path wipe + flip-card play; rise swell audible from ~15.4s | | |
+| 17 | SFX variant (`temporary_sfx.html`): MP4 has an audible audio track (fixture SFX are Mixkit preview URLs, so the render needs network); the slam lands exactly with the 16.2s MEGA-SLAM (audio/video sync) | | |
+| 18 | Fixture 2 (`temporary2.html`, prompt-verbatim full-window .fit): PREVIEW shows AUTO `LOCKED`; at t=16.2s the white flash + double rings + chromatic ghosts + "PROOF?" land on ONE frame with the hit sound; odometer rolls, clip-path wipe + flip-card play; swish sound audible from ~15.4s | | |
 | 19 | RENDER screen shows `AUDIO: mixing` then `AUDIO: encoding` before frames start (no silent hang); SFX volume comfortable at default, QUIET vs LOUD audibly differ; TEXT BIG renders visibly larger text than COMPACT | | |
 | 20 | FAST PATH: render r f/s clearly higher than the previous APK on the same HTML + settings; logcat tag `RenderEngine` shows `gpu probe passed` (a `software path` line means fallback - output still correct, just slower); MP4 VERIFIED and frame0.png still matches | | |
 
