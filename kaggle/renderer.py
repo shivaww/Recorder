@@ -97,7 +97,8 @@ def extract_sfx_manifest(page):
             const evs = Array.isArray(d) ? d : (d.events || []);
             return {events: evs.map(e => ({
                 t: +e.t,
-                id: String(e.id || 'tick'),
+                url: String(e.url || ''),
+                dur: Math.max(0, +e.dur || 0),
                 gain: Math.min(1, Math.max(0, +e.gain || 0.7))
             }))};
         } catch(err) { return {events: []}; }

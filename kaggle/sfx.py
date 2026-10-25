@@ -1,75 +1,33 @@
-"""sfx.py — SFX synthesis, ambience beds, and audio mixing.
+"""sfx.py - URL-based SFX loading, ambience beds, and audio mixing.
 
-Synthesizes declarative audio events from the HTML's #sfx JSON manifest
-and ambience beds from #ambience, mixes them into a WAV for ffmpeg muxing.
+SFX events come from the HTML's #sfx JSON manifest as audio URLs. assets.py
+downloads each URL into <job>/assets/ and rewrites it to that relative path;
+this module decodes those files with ffmpeg and mixes them, plus the
+synthesized ambience bed from #ambience, into a WAV for ffmpeg muxing.
 """
+import os
+import subprocess
 import wave
 import numpy as np
 
 from config import SAMPLE_RATE, MASTER_GAIN
 
 
-# ─── SFX SYNTHESIS ────────────────────────────────────────────────────────────
+# --- SFX LOADING -------------------------------------------------------------
 
-def synth_slam(n):
-    t = np.arange(n) / SAMPLE_RATE
-    nz = np.random.RandomState(11).rand(n) * 2 - 1
-    f = 140.0 * np.exp(-t * 22.0) + 42.0
-    ph = np.cumsum(2 * np.pi * f / SAMPLE_RATE)
-    return np.sin(ph) * np.exp(-t * 14.0) + nz * np.exp(-t * 90.0) * 0.5
+TRIM_FADE_SEC = 0.08   # fade-out so a dur cut does not click
+MAX_SFX_SEC = 10.0   # per-event cap so a stray full song cannot flood the mix
 
-def synth_boom(n):
-    t = np.arange(n) / SAMPLE_RATE
-    nz = np.random.RandomState(37).rand(n) * 2 - 1
-    f = 70.0 * np.exp(-t * 8.0) + 28.0
-    ph = np.cumsum(2 * np.pi * f / SAMPLE_RATE)
-    return np.sin(ph) * np.exp(-t * 6.0) + nz * np.exp(-t * 20.0) * 0.15
 
-def synth_whoosh(n):
-    nz = np.random.RandomState(23).rand(n) * 2 - 1
-    p = np.arange(n) / n
-    a = (0.04 + 0.46 * p)
-    lp = np.zeros(n)
-    for i in range(1, n):
-        lp[i] = lp[i-1] + a[i] * (nz[i] - lp[i-1])
-    return lp * np.sin(np.pi * p) * 0.8
-
-def synth_tick(n):
-    t = np.arange(n) / SAMPLE_RATE
-    nz = np.random.RandomState(31).rand(n) * 2 - 1
-    return nz * np.exp(-t * 400.0) * 0.9
-
-def synth_rise(n):
-    p = np.arange(n) / n
-    f = 180.0 * (1400.0 / 180.0) ** p
-    ph = np.cumsum(2 * np.pi * f / SAMPLE_RATE)
-    trem = 0.7 + 0.3 * np.sin(2 * np.pi * 7.0 * p)
-    return np.sin(ph) * trem * (0.15 + 0.55 * p)
-
-def synth_ding(n):
-    t = np.arange(n) / SAMPLE_RATE
-    d = np.exp(-t * 8.0)
-    return (np.sin(2*np.pi*1318.0*t)*0.6 + np.sin(2*np.pi*1976.0*t)*0.25) * d
-
-def synth_pop(n):
-    p = np.arange(n) / n
-    f = 260.0 + 640.0 * p
-    ph = np.cumsum(2 * np.pi * f / SAMPLE_RATE)
-    return np.sin(ph) * (1.0 - p) * 0.8
-
-def synth_glitch(n):
-    t = np.arange(n) / SAMPLE_RATE
-    nz = np.random.RandomState(47).rand(n) * 2 - 1
-    gate = (np.sin(2 * np.pi * 60.0 * t) > 0).astype(float)
-    return nz * gate * np.exp(-t * 12.0) * 0.8
-
-def synth_sound(sid, n):
-    dispatch = {
-        "slam": synth_slam, "boom": synth_boom, "whoosh": synth_whoosh,
-        "rise": synth_rise, "ding": synth_ding, "pop": synth_pop,
-        "glitch": synth_glitch,
-    }
-    return dispatch.get(sid, synth_tick)(n)
+def load_sfx(path):
+    """Decode any ffmpeg-readable audio file to mono float32 at SAMPLE_RATE."""
+    cmd = ["ffmpeg", "-nostdin", "-v", "error", "-i", path, "-t", str(MAX_SFX_SEC),
+           "-vn", "-f", "f32le", "-ac", "1", "-ar", str(SAMPLE_RATE), "-"]
+    r = subprocess.run(cmd, capture_output=True, stdin=subprocess.DEVNULL, timeout=60)
+    if r.returncode != 0 or not r.stdout:
+        msg = r.stderr.decode("utf-8", "replace").strip()[-200:]
+        raise ValueError(msg or "empty audio")
+    return np.frombuffer(r.stdout, dtype=np.float32)
 
 
 # ─── AMBIENCE BEDS ────────────────────────────────────────────────────────────
@@ -119,35 +77,65 @@ def get_ambience(typ, n):
     return raw
 
 
-# ─── AUDIO MIX ────────────────────────────────────────────────────────────────
+# --- AUDIO MIX ---------------------------------------------------------------
 
-def mix_audio(events, ambience_type, duration_sec, out_path):
-    """Synthesize SFX events + ambience bed into a WAV file.
+def mix_audio(events, ambience_type, duration_sec, out_path, base_dir):
+    """Mix URL-based SFX events + ambience bed into a WAV file.
 
     Args:
-        events: list of {"t": seconds, "id": sound_id, "gain": 0-1}
+        events: list of {"t": seconds, "url": "assets/<file>", "gain": 0-1,
+            optional "dur": seconds to play, 0 or omitted = whole file};
+            assets.py already downloaded each url into base_dir/assets/
         ambience_type: "drone"|"pulse"|"air"|"tension" or None
         duration_sec: total timeline duration
         out_path: where to write the WAV
+        base_dir: directory that the event urls are relative to
+
+    Returns True if the WAV was written, False if there was nothing to mix
+    (no ambience and no event loaded), in which case the video stays silent.
     """
     total = int(duration_sec * SAMPLE_RATE) + SAMPLE_RATE // 4
     acc = np.zeros(total, dtype=np.float32)
+    assets_dir = os.path.realpath(os.path.join(base_dir, "assets"))
+    used = False
 
     if ambience_type:
         bed = get_ambience(ambience_type, int(duration_sec * SAMPLE_RATE))
         acc[:len(bed)] += bed * 0.25
+        used = True
 
+    cache = {}
     for e in events:
-        t_sec = e.get("t", 0)
-        eid = e.get("id", "tick")
-        gain = e.get("gain", 0.7)
-        n = int(0.8 * SAMPLE_RATE)
-        buf = synth_sound(eid, n)
-        start = int(t_sec * SAMPLE_RATE)
+        url = str(e.get("url") or "")
+        path = os.path.realpath(os.path.join(base_dir, url))
+        # Only decode files assets.py downloaded; never a raw remote url or other path.
+        if os.path.dirname(path) != assets_dir or not os.path.isfile(path):
+            print("[sfx] skipped (not a downloaded asset): %s" % url[:80], flush=True)
+            continue
+        if path not in cache:
+            try:
+                cache[path] = load_sfx(path)
+            except Exception as ex:
+                cache[path] = None
+                print("[sfx] decode failed %s: %s" % (url[:80], ex), flush=True)
+        buf = cache[path]
+        if buf is None:
+            continue
+        dur = float(e.get("dur") or 0)
+        if dur > 0:
+            buf = buf[:int(dur * SAMPLE_RATE)].copy()
+            fade = min(int(TRIM_FADE_SEC * SAMPLE_RATE), len(buf))
+            if fade > 0:
+                buf[-fade:] *= np.linspace(1.0, 0.0, fade, dtype=np.float32)
+        start = int(float(e.get("t") or 0) * SAMPLE_RATE)
         if start < 0 or start >= total:
             continue
         end = min(start + len(buf), total)
-        acc[start:end] += buf[:end-start] * gain
+        acc[start:end] += buf[:end - start] * float(e.get("gain", 0.7))
+        used = True
+
+    if not used:
+        return False
 
     acc = acc / (1.0 + np.abs(acc))
     acc = (acc * 32767.0 * MASTER_GAIN).astype(np.int16)
@@ -157,3 +145,4 @@ def mix_audio(events, ambience_type, duration_sec, out_path):
         wf.setsampwidth(2)
         wf.setframerate(SAMPLE_RATE)
         wf.writeframes(acc.tobytes())
+    return True

@@ -85,15 +85,15 @@ All motion is deterministic, scrub-safe, and timed exactly to spoken syllables. 
 
 SFX must be **sparse and diegetic** — reserved for genuine narrative beats (a reveal, an impact, a consequential transition), not every micro-motion or element entrance. As a guideline, most 45–75s scenes carry roughly 3–8 SFX events total, not one per animation. Silence between beats is fine and often stronger than constant scoring.
 
-Sound is declared as data and baked into the video render. Place this block right before `</body>`:
+Sound is declared as data and baked into the video render. Each SFX event points to a direct audio URL; the render server downloads it and mixes it into the soundtrack. Place this block right before `</body>`:
 
 ```html
 <script type="application/json" id="sfx">
 {
   "loudness": "normal",
   "events": [
-    {"t": 1.4, "id": "pop", "gain": 0.5},
-    {"t": 8.1, "id": "slam", "gain": 0.7}
+    {"t": 1.4, "url": "<URL_1>", "gain": 0.5, "dur": 3},
+    {"t": 8.1, "url": "<URL_2>", "gain": 0.7}
   ]
 }
 </script>
@@ -102,7 +102,21 @@ Sound is declared as data and baked into the video render. Place this block righ
 </script>
 ```
 
-Allowed SFX IDs: `slam, boom, whoosh, tick, pop, glitch, ding, type`.
+Each `events` entry is `{"t": <seconds>, "url": "<direct https audio URL>", "gain": <0 to 1>, "dur": <seconds, optional>}`; `gain` defaults to 0.7 if omitted. `dur` plays only the first `dur` seconds of the file with a short fade-out; omit it to play the whole file.
+
+- `url` must be an exact URL supplied in the request or returned by Grok. Never guess or invent one. There is no `id` field; do not add one.
+- If the scene has SFX and the audio URLs are not already in the request, follow Part 4C Step 1 to get them, even when the scene has no images.
+- Use short one-shot sound effects (mp3, wav or ogg). Anything longer than 10s is cut off at 10s. If a file is longer than the moment needs (for example a 20s file used as a 3s hit), set `dur` to the length that fits the beat. Grok's reply states each file's duration; use it to choose `dur`.
+- Reuse the same URL string every time the same sound recurs.
+- If no usable URL exists for a beat, leave that event out. Silence is fine and `"events": []` is valid.
+
+**Placement and mixing (how professional editors use SFX):**
+- Sync to the frame: `t` is on the same timeline as `animation-delay`. A whoosh starts 0.1 to 0.2s before the motion it accompanies so its peak lands with the cut, wipe or slide. An impact lands exactly on the frame the element hits. A riser ends exactly on the reveal it builds toward: never trim it with `dur` (its payoff is at the end), set `t` to the reveal time minus the riser's reported duration, and skip a riser reported longer than 10s.
+- Match sound to motion: whoosh for wipes, slides and scene changes; impact or boom for a slam, title hit or big reveal; soft pop or tick for a small element appearing; ding for a success or result; glitch for errors or digital effects.
+- Keep it clean: never two SFX within 0.3s unless deliberately layered (an impact with a boom under it). Do not use the same sound more than 3 times in a scene. No SFX on routine element entrances or caption words.
+- Levels: whoosh, pop and tick at gain 0.3 to 0.5, ding 0.4 to 0.6, impacts and booms 0.6 to 0.8, never above 0.9. SFX must never compete with the narration.
+- Lengths: set `dur` to about 0.4 to 1s for whooshes, 0.2 to 0.5s for pops and ticks, 1 to 2s for impacts and booms.
+
 Ambience types: `drone, pulse, air, tension`.
 
 ════════ PART 4 — HARD RENDERER CONTRACT ════════
@@ -193,23 +207,40 @@ stays exactly as written in Parts 1-4.
   and every anti-collision rule remain in force unchanged.
 - `cqh`/`cqw` units self-adapt to the tall container - the 2.2cqh minimum
   still applies at the same physical proportion.
-======== PART 4C - REAL IMAGES (LOGOS, PRODUCTS, PHOTOS) ========
+======== PART 4C - REAL IMAGES (LOGOS, PRODUCTS, PHOTOS) AND SFX AUDIO URLS ========
 
 When the transcript names a real brand, product, person, or object that reads best as its actual image (e.g. the Claude logo), use a real image instead of redrawing it. The render server downloads each flagged image and removes its background automatically.
 
-**Step 1 - get URLs first.** If the image URLs are not already in the request, print the CREATIVE SYNTHESIS, then STOP and output only the block below plus this line: "Paste this into Grok. When it replies, paste its full answer back to me." Do not write HTML until the URLs arrive. Never guess or invent a URL.
+**Step 1 - get URLs first.** If any image or SFX URLs you need are not already in the request, print the CREATIVE SYNTHESIS (including your sound plan: which beats get an SFX and what each sound is), then STOP and output only the block below plus this line: "Paste this into Grok. When it replies, paste its full answer back to me." Do not write HTML until the URLs arrive. Never guess or invent a URL.
 
 ```json
 {
   "agent": "grok",
   "q": [
     "Direct https image URL (ends in .png, .webp, .jpg or .svg, publicly hotlinkable, high resolution, subject clearly visible) for: <subject 1>",
-    "Direct https image URL (same requirements) for: <subject 2>"
+    "Direct https image URL (same requirements) for: <subject 2>",
+    "Direct https audio URL (ends in .mp3, .wav or .ogg, publicly hotlinkable, a single clean sound effect with no music or speech, free for commercial use with no attribution, the polished kind professional YouTube editors use) for: <sound 1, e.g. smooth fast whoosh for a wipe or slide transition>. Reply with URL, source site, license, duration."
   ]
 }
 ```
 
-One query per distinct subject. Request only the images the scene truly needs, and never request the same subject twice. Ask for the official full-color mark on a transparent or plain background. If the mark is mostly dark and the scene is dark (or mostly white on a light scene), ask for the light/white variant instead.
+One query per distinct subject or sound. Request only the images and sounds the scene truly needs (a sound reused at several beats is requested once), and never request the same subject twice. Omit the audio queries when the scene has no SFX, and omit the image queries when it has no images. Ask for the official full-color mark on a transparent or plain background. If the mark is mostly dark and the scene is dark (or mostly white on a light scene), ask for the light/white variant instead.
+
+**SFX queries (audio).** The user should never have to remember this wording, so write the audio queries exactly like this every time:
+- One query per distinct sound in your sound plan. Write the full requirements in every audio query (never "same requirements", because the list also holds image queries):
+  `Direct https audio URL (ends in .mp3, .wav or .ogg, publicly hotlinkable, a single clean sound effect with no music or speech, free for commercial use with no attribution, the polished kind professional YouTube editors use) for: <sound description>. Reply with URL, source site, license, duration.`
+- Never put a length in the query (no "under 10 seconds", no "0.5 to 1 second"). Grok may treat a length as a hard filter and answer "none found". Any length is fine: after Grok replies, trim with `dur` in `#sfx`, using the duration Grok reports.
+- Describe each sound by its role. Standard set (ask only for the ones the scene uses):
+  - whoosh: `smooth fast whoosh for a wipe or slide transition`
+  - impact: `cinematic impact hit for a title slam or big reveal`
+  - boom: `deep sub-bass boom drop`
+  - riser: `tension riser that builds to a reveal`
+  - pop: `soft UI pop or click for a small element appearing`
+  - ding: `clean notification ding or success chime`
+  - glitch: `short digital glitch burst`
+  - typing: `keyboard typing burst`
+- For any other sound, write a similar role-based description.
+- If Grok finds no match for a sound, drop that event from `#sfx`. Never fill the gap with a guessed URL.
 
 **Step 2 - markup.** For every supplied image:
 - Write `<img data-nobg src="https://..." alt="...">`. The `data-nobg` attribute is mandatory: it tells the server to cut out the background. Never attempt background removal in CSS.
@@ -245,7 +276,7 @@ One query per distinct subject. Request only the images the scene truly needs, a
 ═══ PART 5 — DELIVERABLE FORMAT ════════
 
 1. **CREATIVE SYNTHESIS** — chosen visual vehicle (confirmed unused this session), aesthetic tone, target duration, Continuity Carry-Forward statement, Google font pairing, semantic palette, artifact plan.
-2. **BEAT TABLE:** `Timestamp | Spoken Beat | Visual Stage Event | Software Artifact Action | SFX ID`
-3. **MANIFEST:** Duration (matching the `#duration` JSON exactly), Chosen Visual Vehicle, Active Window Count, SFX Count, Logo Count (equal to the number of `data-nobg` images).
+2. **BEAT TABLE:** `Timestamp | Spoken Beat | Visual Stage Event | Software Artifact Action | SFX (sound + URL #)`
+3. **MANIFEST:** Duration (matching the `#duration` JSON exactly), Chosen Visual Vehicle, Active Window Count, SFX Count (equal to the number of `#sfx` events), Logo Count (equal to the number of `data-nobg` images).
 4. **THE COMPLETE, SELF-CONTAINED HTML FILE** (inline CSS + inline SVG/Canvas + JSON sound + `#duration` block).
 5. **RENDER VERIFICATION:** timecode check for UI appearances, audio sync, and confirmation the `#duration` block matches the manifest, plus a logo check: each logo's entrance time against its spoken word, and a note that no logo sits in the caption zone or the gutter.
