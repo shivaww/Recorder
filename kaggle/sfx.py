@@ -105,6 +105,7 @@ def mix_audio(events, ambience_type, duration_sec, out_path, base_dir):
         used = True
 
     cache = {}
+    placed = []   # (path, start, end) in samples of each sound already mixed
     for e in events:
         url = str(e.get("url") or "")
         path = os.path.realpath(os.path.join(base_dir, url))
@@ -121,8 +122,12 @@ def mix_audio(events, ambience_type, duration_sec, out_path, base_dir):
         buf = cache[path]
         if buf is None:
             continue
+        file_sec = len(buf) / SAMPLE_RATE
         dur = float(e.get("dur") or 0)
-        if dur > 0:
+        if dur > file_sec + 0.02:
+            # asked for more than the file has: play it once as-is, never loop or stretch
+            print("[sfx] dur %.2fs asked but file is only %.2fs, playing it once: %s" % (dur, file_sec, url[:60]), flush=True)
+        elif dur > 0:
             buf = buf[:int(dur * SAMPLE_RATE)].copy()
             fade = min(int(TRIM_FADE_SEC * SAMPLE_RATE), len(buf))
             if fade > 0:
@@ -131,6 +136,12 @@ def mix_audio(events, ambience_type, duration_sec, out_path, base_dir):
         if start < 0 or start >= total:
             continue
         end = min(start + len(buf), total)
+        if any(p[0] == path and abs(p[1] - start) < int(0.3 * SAMPLE_RATE) for p in placed):
+            print("[sfx] skipped repeat of the same sound within 0.3s at t=%.2f: %s" % (start / SAMPLE_RATE, url[:60]), flush=True)
+            continue
+        if any(start < p[2] and end > p[1] for p in placed):
+            print("[sfx] warning: overlaps an earlier sound at t=%.2f" % (start / SAMPLE_RATE), flush=True)
+        placed.append((path, start, end))
         acc[start:end] += buf[:end - start] * float(e.get("gain", 0.7))
         used = True
 

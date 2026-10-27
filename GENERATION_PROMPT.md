@@ -92,7 +92,7 @@ Sound is declared as data and baked into the video render. Each SFX event points
 {
   "loudness": "normal",
   "events": [
-    {"t": 1.4, "url": "<URL_1>", "gain": 0.5, "dur": 3},
+    {"t": 1.4, "url": "<URL_1>", "gain": 0.5, "dur": <seconds, at most the duration Grok reported for URL_1>},
     {"t": 8.1, "url": "<URL_2>", "gain": 0.7}
   ]
 }
@@ -105,8 +105,8 @@ Sound is declared as data and baked into the video render. Each SFX event points
 Each `events` entry is `{"t": <seconds>, "url": "<direct https audio URL>", "gain": <0 to 1>, "dur": <seconds, optional>}`; `gain` defaults to 0.7 if omitted. `dur` plays only the first `dur` seconds of the file with a short fade-out; omit it to play the whole file.
 
 - `url` must be an exact URL supplied in the request or returned by Grok. Never guess or invent one. There is no `id` field; do not add one.
-- If the scene has SFX and the audio URLs are not already in the request, follow Part 4C Step 1 to get them, even when the scene has no images.
-- Use short one-shot sound effects (mp3, wav or ogg). Anything longer than 10s is cut off at 10s. If a file is longer than the moment needs (for example a 20s file used as a 3s hit), set `dur` to the length that fits the beat. Grok's reply states each file's duration; use it to choose `dur`.
+- If the scene has SFX and the audio URLs are not already in the request, follow Part 4C Step 1 to get them, even when the scene has no images. Step 1 comes before any planning: SFX placement is planned only after Grok reports each file's duration.
+- Use short one-shot sound effects (mp3, wav or ogg). Anything longer than 10s is cut off at 10s. Grok's reply states each file's exact duration, and that duration is the sound's real length: plan every moment around it. `dur` is never longer than the reported duration, because the render plays each file once and never loops it, so a longer `dur` only leaves silence. If the file is longer than the beat needs, set a shorter `dur`; if a beat needs a longer sound than the file has, pick a different sound (ask Grok again) instead of repeating the same file.
 - Reuse the same URL string every time the same sound recurs.
 - If no usable URL exists for a beat, leave that event out. Silence is fine and `"events": []` is valid.
 
@@ -115,7 +115,7 @@ Each `events` entry is `{"t": <seconds>, "url": "<direct https audio URL>", "gai
 - Match sound to motion: whoosh for wipes, slides and scene changes; impact or boom for a slam, title hit or big reveal; soft pop or tick for a small element appearing; ding for a success or result; glitch for errors or digital effects.
 - Keep it clean: never two SFX within 0.3s unless deliberately layered (an impact with a boom under it). Do not use the same sound more than 3 times in a scene. No SFX on routine element entrances or caption words.
 - Levels: whoosh, pop and tick at gain 0.3 to 0.5, ding 0.4 to 0.6, impacts and booms 0.6 to 0.8, never above 0.9. SFX must never compete with the narration.
-- Lengths: set `dur` to about 0.4 to 1s for whooshes, 0.2 to 0.5s for pops and ticks, 1 to 2s for impacts and booms.
+- Lengths: never assume a sound's length from its type. Use the duration Grok reported for that exact file; `dur` is at most that, and every event plays once.
 
 Ambience types: `drone, pulse, air, tension`.
 
@@ -211,7 +211,7 @@ stays exactly as written in Parts 1-4.
 
 When the transcript names a real brand, product, person, or object that reads best as its actual image (e.g. the Claude logo), use a real image instead of redrawing it. The render server downloads each flagged image and removes its background automatically.
 
-**Step 1 - get URLs first.** If any image or SFX URLs you need are not already in the request, print the CREATIVE SYNTHESIS (including your sound plan: which beats get an SFX and what each sound is), then STOP and output only the block below plus this line: "Paste this into Grok. When it replies, paste its full answer back to me." Do not write HTML until the URLs arrive. Never guess or invent a URL.
+**Step 1 - get URLs first.** If any image or SFX URLs you need are not already in the request, do not print the CREATIVE SYNTHESIS and do not plan beats yet: skim the transcript only to list the brands that need images and the sound roles the story needs (whoosh, impact, pop and so on), then STOP at once and output only the block below plus this line: "Paste this into Grok. When it replies, paste its full answer back to me." Do not write HTML, and do not plan any SFX placement, until the URLs and each sound's duration arrive. Once Grok replies, print the CREATIVE SYNTHESIS with a sound plan built on the reported durations. Never guess or invent a URL. If the request already supplies the URLs and durations, skip this step; if it supplies URLs without durations, ask Grok only for each file's exact duration.
 
 ```json
 {
@@ -219,7 +219,7 @@ When the transcript names a real brand, product, person, or object that reads be
   "q": [
     "Direct https image URL (ends in .png, .webp, .jpg or .svg, publicly hotlinkable, high resolution, subject clearly visible) for: <subject 1>",
     "Direct https image URL (same requirements) for: <subject 2>",
-    "Direct https audio URL (ends in .mp3, .wav or .ogg, publicly hotlinkable, a single clean sound effect with no music or speech, free for commercial use with no attribution, the polished kind professional YouTube editors use) for: <sound 1, e.g. smooth fast whoosh for a wipe or slide transition>. Reply with URL, source site, license, duration."
+    "Direct https audio URL (ends in .mp3, .wav or .ogg, publicly hotlinkable, a single clean sound effect with no music or speech, free for commercial use with no attribution, the polished kind professional YouTube editors use) for: <sound 1, e.g. smooth fast whoosh for a wipe or slide transition>. The URL must be the audio file itself, not a web page: no search, category, tag, pack, playlist or sound-page link on any site or platform, and it must open or download with no login. Reply in exactly this format: URL | exact duration in seconds, read from the real file | source site | license. One URL per sound."
   ]
 }
 ```
@@ -228,8 +228,8 @@ One query per distinct subject or sound. Request only the images and sounds the 
 
 **SFX queries (audio).** The user should never have to remember this wording, so write the audio queries exactly like this every time:
 - One query per distinct sound in your sound plan. Write the full requirements in every audio query (never "same requirements", because the list also holds image queries):
-  `Direct https audio URL (ends in .mp3, .wav or .ogg, publicly hotlinkable, a single clean sound effect with no music or speech, free for commercial use with no attribution, the polished kind professional YouTube editors use) for: <sound description>. Reply with URL, source site, license, duration.`
-- Never put a length in the query (no "under 10 seconds", no "0.5 to 1 second"). Grok may treat a length as a hard filter and answer "none found". Any length is fine: after Grok replies, trim with `dur` in `#sfx`, using the duration Grok reports.
+  `Direct https audio URL (ends in .mp3, .wav or .ogg, publicly hotlinkable, a single clean sound effect with no music or speech, free for commercial use with no attribution, the polished kind professional YouTube editors use) for: <sound description>. The URL must be the audio file itself, not a web page: no search, category, tag, pack, playlist or sound-page link on any site or platform, and it must open or download with no login. Reply in exactly this format: URL | exact duration in seconds, read from the real file | source site | license. One URL per sound.`
+- Never put a length in the query (no "under 10 seconds", no "0.5 to 1 second"). Grok may treat a length as a hard filter and answer "none found". Any length is fine, but Grok must report each file's exact duration. After Grok replies, plan every sound from that duration: `dur` is at most the reported duration, and each event plays the file once, never repeated or looped to fill time. If a reply has no duration, or gives a web page instead of a direct audio file, do not use it and do not guess: emit a new Grok block asking again for only those sounds. Before writing HTML, list the sound plan as: sound, URL, reported duration, and each `t` with the `dur` used; check that no two windows (`t` to `t + dur`) overlap.
 - Describe each sound by its role. Standard set (ask only for the ones the scene uses):
   - whoosh: `smooth fast whoosh for a wipe or slide transition`
   - impact: `cinematic impact hit for a title slam or big reveal`
