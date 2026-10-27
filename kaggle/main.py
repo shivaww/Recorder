@@ -136,7 +136,9 @@ def process_job(job_id):
         sfx_events = result.get("sfx_events", [])
         ambience_type = result.get("ambience_type")
         if sfx_events or ambience_type:
-            mix_audio(sfx_events, ambience_type, duration, wav_path, os.path.dirname(html_path))
+            mix_audio(sfx_events, ambience_type, duration, wav_path, os.path.dirname(html_path),
+                      loudness=result.get("sfx_loudness"),
+                      ambience_gain=result.get("ambience_gain", 0.25))
         else:
             wav_path = None
 

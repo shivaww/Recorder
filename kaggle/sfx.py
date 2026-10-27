@@ -19,6 +19,10 @@ TRIM_FADE_SEC = 0.08   # fade-out so a dur cut does not click
 MAX_SFX_SEC = 10.0   # per-event cap so a stray full song cannot flood the mix
 
 
+# page-declared loudness -> gain multiplier (same values as the Android Sfx.kt)
+LOUDNESS_MULT = {"low": 0.5, "quiet": 0.5, "high": 1.6, "loud": 1.6}
+
+
 def load_sfx(path):
     """Decode any ffmpeg-readable audio file to mono float32 at SAMPLE_RATE."""
     cmd = ["ffmpeg", "-nostdin", "-v", "error", "-i", path, "-t", str(MAX_SFX_SEC),
@@ -79,7 +83,8 @@ def get_ambience(typ, n):
 
 # --- AUDIO MIX ---------------------------------------------------------------
 
-def mix_audio(events, ambience_type, duration_sec, out_path, base_dir):
+def mix_audio(events, ambience_type, duration_sec, out_path, base_dir,
+              loudness=None, ambience_gain=0.25):
     """Mix URL-based SFX events + ambience bed into a WAV file.
 
     Args:
@@ -90,6 +95,8 @@ def mix_audio(events, ambience_type, duration_sec, out_path, base_dir):
         duration_sec: total timeline duration
         out_path: where to write the WAV
         base_dir: directory that the event urls are relative to
+        loudness: page-declared "low" | "normal" | "high" (None = normal)
+        ambience_gain: ambience bed level 0-1, from the #ambience gain
 
     Returns True if the WAV was written, False if there was nothing to mix
     (no ambience and no event loaded), in which case the video stays silent.
@@ -101,7 +108,7 @@ def mix_audio(events, ambience_type, duration_sec, out_path, base_dir):
 
     if ambience_type:
         bed = get_ambience(ambience_type, int(duration_sec * SAMPLE_RATE))
-        acc[:len(bed)] += bed * 0.25
+        acc[:len(bed)] += bed * float(ambience_gain)
         used = True
 
     cache = {}
@@ -149,7 +156,8 @@ def mix_audio(events, ambience_type, duration_sec, out_path, base_dir):
         return False
 
     acc = acc / (1.0 + np.abs(acc))
-    acc = (acc * 32767.0 * MASTER_GAIN).astype(np.int16)
+    mult = LOUDNESS_MULT.get(str(loudness or "normal").lower(), 1.0)
+    acc = (acc * 32767.0 * MASTER_GAIN * mult).astype(np.int16)
 
     with wave.open(out_path, 'w') as wf:
         wf.setnchannels(1)

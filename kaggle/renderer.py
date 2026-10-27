@@ -95,12 +95,15 @@ def extract_sfx_manifest(page):
         try {
             const d = JSON.parse(el.textContent);
             const evs = Array.isArray(d) ? d : (d.events || []);
-            return {events: evs.map(e => ({
-                t: +e.t,
-                url: String(e.url || ''),
-                dur: Math.max(0, +e.dur || 0),
-                gain: Math.min(1, Math.max(0, +e.gain || 0.7))
-            }))};
+            const loud = (!Array.isArray(d) && d.loudness) ? String(d.loudness).toLowerCase() : 'normal';
+            return {loudness: loud, events: evs
+                .filter(e => e && e.url && Number.isFinite(+e.t))
+                .map(e => ({
+                    t: +e.t,
+                    url: String(e.url),
+                    dur: Math.max(0, +e.dur || 0),
+                    gain: (e.gain === undefined || e.gain === null || !Number.isFinite(+e.gain)) ? 0.7 : Math.min(1, Math.max(0, +e.gain))
+                }))};
         } catch(err) { return {events: []}; }
     })()""")
 
@@ -112,7 +115,8 @@ def extract_ambience_manifest(page):
         if (!el) return null;
         try {
             const d = JSON.parse(el.textContent);
-            return {type: String(d.type || 'drone')};
+            const g = (d.gain === undefined || d.gain === null || !Number.isFinite(+d.gain)) ? 0.25 : Math.min(1, Math.max(0, +d.gain));
+            return {type: String(d.type || 'drone'), gain: g};
         } catch(err) { return null; }
     })()""")
 
@@ -340,6 +344,8 @@ def render_frames(html_path, frames_dir, fps, resolution, duration, enhance,
     return {
         "sfx_events": sfx_manifest.get("events", []),
         "ambience_type": amb_manifest.get("type") if amb_manifest else None,
+        "ambience_gain": amb_manifest.get("gain", 0.25) if amb_manifest else 0.25,
+        "sfx_loudness": sfx_manifest.get("loudness", "normal"),
         "clip_bounds": clip,
         "total_frames": total_frames
     }
