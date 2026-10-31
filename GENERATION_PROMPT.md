@@ -83,7 +83,7 @@ All motion is deterministic, scrub-safe, and timed exactly to spoken syllables. 
 
 ── SOUND DESIGN (Declared JSON Data) ──
 
-SFX must be **sparse and diegetic** — reserved for genuine narrative beats (a reveal, an impact, a consequential transition), not every micro-motion or element entrance. As a guideline, most 45–75s scenes carry roughly 3–8 SFX events total, not one per animation. Silence between beats is fine and often stronger than constant scoring.
+SFX must be **purposeful, engaging, and diegetic** — punctuating narrative beats (a reveal, an impact, a consequential transition, tactile interaction), not mindless noise on every micro-motion. A typical 45–75s scene naturally carries roughly 4–10 well-placed SFX events. Silence between beats gives audio its power and dynamic punch.
 
 Sound is declared as data and baked into the video render. Each SFX event points to a direct audio URL; the render server downloads it and mixes it into the soundtrack. Place this block right before `</body>`:
 
@@ -107,14 +107,22 @@ Each `events` entry is `{"t": <seconds>, "url": "<direct https audio URL>", "gai
 - `url` must be an exact URL supplied in the request or returned by Grok. Never guess or invent one. There is no `id` field; do not add one.
 - If the scene has SFX and the audio URLs are not already in the request, follow Part 4C Step 1 to get them, even when the scene has no images. Step 1 comes before any planning: SFX placement is planned only after Grok reports each file's duration.
 - Use short one-shot sound effects (mp3, wav or ogg). Anything longer than 10s is cut off at 10s. Grok's reply states each file's exact duration, and that duration is the sound's real length: plan every moment around it. `dur` is never longer than the reported duration, because the render plays each file once and never loops it, so a longer `dur` only leaves silence. If the file is longer than the beat needs, set a shorter `dur`; if a beat needs a longer sound than the file has, pick a different sound (ask Grok again) instead of repeating the same file.
-- Reuse the same URL string every time the same sound recurs.
 - If no usable URL exists for a beat, leave that event out. Silence is fine and `"events": []` is valid.
+
+**Creative Freedom & Deciding When to Reuse vs. Introduce New SFX:**
+You have complete creative freedom to curate an engaging, cinematic audio experience. Neither force constant reuse nor force brand-new SFX on every single beat — decide naturally based on visual context, material, and narrative weight:
+- **When to reuse an SFX:** Reuse the same sound (and identical URL) when maintaining sonic consistency reinforces a visual identity or recurring interaction — e.g. repeated clicks on the same UI widget, recurring card taps, sequential list ticks, or an intentional sonic leitmotif. When the visual action and energy are genuinely identical, reuse establishes cohesion.
+- **When to introduce a new SFX:** Use a distinct sound whenever the visual texture, physical material, scale, or dramatic energy changes across scenes or clips. A light tactile card slide is wrong for a massive data slam; a snappy whip cut needs a different whoosh than a slow cinematic crossfade; a high-tech digital pop differs from a paper rustle, camera shutter, or tape stop. Reusing the same generic whoosh or pop across completely different visual clips makes the production feel cheap, repetitive, and amateur. Give distinct visual moments their own tailored sonic identity.
+
+**Professionalism & Sound Quality (Video Essay / Documentary Standard):**
+- **Only use professional, widely used SFX:** Model your soundscape on top-tier video essays and motion design (Vox, Johnny Harris, Magnates Media): cinematic whooshes, tape stops, sub-bass drops, camera shutters, tactile foley (paper rustles, card snaps, mechanical switches), clean glass chimes, subtle tension risers, and modern UI pops.
+- **Strictly avoid amateur or unprofessional sounds:** Never use cartoonish or comedic SFX (boings, springs, wacky slides, horn honks, whistle sounds), cheesy 8-bit arcade bleeps, harsh clipping noise, meme sound bites, or muddy low-quality audio that degrades credibility.
 
 **Placement and mixing (how professional editors use SFX):**
 - Sync to the frame: `t` is on the same timeline as `animation-delay`. A whoosh starts 0.1 to 0.2s before the motion it accompanies so its peak lands with the cut, wipe or slide. An impact lands exactly on the frame the element hits. A riser ends exactly on the reveal it builds toward: never trim it with `dur` (its payoff is at the end), set `t` to the reveal time minus the riser's reported duration, and skip a riser reported longer than 10s.
-- Match sound to motion: whoosh for wipes, slides and scene changes; impact or boom for a slam, title hit or big reveal; soft pop or tick for a small element appearing; ding for a success or result; glitch for errors or digital effects.
-- Keep it clean: never two SFX within 0.3s unless deliberately layered (an impact with a boom under it). Do not use the same sound more than 3 times in a scene. No SFX on routine element entrances or caption words.
-- Levels: whoosh, pop and tick at gain 0.3 to 0.5, ding 0.4 to 0.6, impacts and booms 0.6 to 0.8, never above 0.9. SFX must never compete with the narration.
+- Match sound to visual weight: crisp whip whoosh for fast swipes; deep sub-bass or cinematic hit for bold title drops; tactile switch/paper for physical cards; subtle pop or tick for micro UI; tape stop or glitch for stark interruptions.
+- Keep it clean: never two SFX within 0.3s unless deliberately layered (e.g. an impact with a sub-bass boom under it). No SFX on routine micro-movements or caption words.
+- Levels: whoosh, air swish, pop, and tick at gain 0.3 to 0.5; dings and glass chimes at 0.35 to 0.55; impacts, slams, and sub-booms at 0.5 to 0.75, never above 0.85. SFX must complement the visual and never drown out or compete with narration.
 - Lengths: never assume a sound's length from its type. Use the duration Grok reported for that exact file; `dur` is at most that, and every event plays once.
 
 Ambience types: `drone, pulse, air, tension`.
@@ -224,24 +232,20 @@ When the transcript names a real brand, product, person, or object that reads be
 }
 ```
 
-One query per distinct subject or sound. Request only the images and sounds the scene truly needs (a sound reused at several beats is requested once), and never request the same subject twice. Omit the audio queries when the scene has no SFX, and omit the image queries when it has no images. Ask for the official full-color mark on a transparent or plain background. If the mark is mostly dark and the scene is dark (or mostly white on a light scene), ask for the light/white variant instead.
+One query per distinct subject or sound. You have full creative freedom to request any professional sound effect that elevates the scene's visual storytelling. Request a distinct sound for distinct visual moments (e.g., a fast whip cut vs a slow deep slide, or paper foley vs a digital UI click); only reuse a sound query if multiple beats share the exact same visual interaction. Omit audio queries when the scene has no SFX, and omit image queries when it has no images. Ask for the official full-color mark on a transparent or plain background. If the mark is mostly dark and the scene is dark (or mostly white on a light scene), ask for the light/white variant instead.
 
 **SFX queries (audio).** The user should never have to remember this wording, so write the audio queries exactly like this every time:
 - One query per distinct sound in your sound plan. Write the full requirements in every audio query (never "same requirements", because the list also holds image queries):
   `Direct https audio URL (ends in .mp3, .wav or .ogg, publicly hotlinkable, a single clean sound effect with no music or speech, free for commercial use with no attribution, the polished kind professional YouTube editors use) for: <sound description>. The URL must be the audio file itself, not a web page: no search, category, tag, pack, playlist or sound-page link on any site or platform, and it must open or download with no login. Reply in exactly this format: URL | exact duration in seconds, read from the real file | source site | license. One URL per sound.`
 - Never put a length in the query (no "under 10 seconds", no "0.5 to 1 second"). Grok may treat a length as a hard filter and answer "none found". Any length is fine, but Grok must report each file's exact duration. After Grok replies, plan every sound from that duration: `dur` is at most the reported duration, and each event plays the file once, never repeated or looped to fill time. If a reply has no duration, or gives a web page instead of a direct audio file, do not use it and do not guess: emit a new Grok block asking again for only those sounds. Before writing HTML, list the sound plan as: sound, URL, reported duration, and each `t` with the `dur` used; check that no two windows (`t` to `t + dur`) overlap.
-- Describe each sound by its role. Standard set (ask only for the ones the scene uses):
-  - whoosh: `smooth fast whoosh for a wipe or slide transition`
-  - impact: `cinematic impact hit for a title slam or big reveal`
-  - boom: `deep sub-bass boom drop`
-  - riser: `tension riser that builds to a reveal`
-  - pop: `soft UI pop or click for a small element appearing`
-  - ding: `clean notification ding or success chime`
-  - glitch: `short digital glitch burst`
-  - typing: `keyboard typing burst`
-- For any other sound, write a similar role-based description.
+- **Creative Variety & Professional Library:** Describe each sound specifically by its material, texture, and visual intent. Examples of professional, engaging sounds (request whichever fit your creative vision):
+  - Transitions & Motion: `smooth fast air whoosh for a slide cut`, `deep cinematic low-end whoosh pass-by`, `crisp whip whoosh for a snappy camera pan`
+  - Impacts & Hits: `cinematic impact hit with subtle sub-bass`, `heavy documentary title slam`, `muted low-end thud`
+  - Foley & Tactile: `crisp paper slide or document rustle`, `mechanical camera shutter click`, `subtle mechanical keyboard click`, `tactile card snap or flip`
+  - UI & Interaction: `modern tactile UI tick`, `clean glass chime notification`, `soft elegant bubble pop`
+  - Accents & Atmosphere: `tension riser building to a reveal`, `analog tape stop effect`, `short subtle digital glitch burst`, `deep sub-bass drone drop`
+- **Quality Standard:** Always specify professional, broadcast-quality sounds (like those used in Vox, Johnny Harris, or high-end motion design). Explicitly avoid goofy, cartoonish, 8-bit arcade, meme, or amateur sound effects.
 - If Grok finds no match for a sound, drop that event from `#sfx`. Never fill the gap with a guessed URL.
-
 **Step 2 - markup.** For every supplied image:
 - Write `<img data-nobg src="https://..." alt="...">`. The `data-nobg` attribute is mandatory: it tells the server to cut out the background. Never attempt background removal in CSS.
 - Use the exact URL given. Size and place with `cqh`/`cqw` only, with explicit width and height and `object-fit: contain`.
