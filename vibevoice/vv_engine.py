@@ -32,11 +32,37 @@ def _dtype():
     return torch.float32
 
 
-def _device_map():
-    # The 7B model does not fit one T4: shard its layers across every GPU.
-    if DEVICE == 'cuda' and torch.cuda.device_count() > 1:
-        return 'auto'
-    return DEVICE
+def _no_split(meta):
+    # Layer classes that must stay whole on one GPU, gathered from every sub-model.
+    names = set()
+    for m in meta.modules():
+        names |= set(getattr(m, '_no_split_modules', None) or [])
+    print(f'no-split layer classes: {sorted(names)}')
+    return sorted(names)
+
+
+def _device_map(cls):
+    # The 7B model does not fit one T4, so shard layers across every GPU.
+    # device_map='auto' leaves loose tensors (model.speech_bias_factor) with no
+    # device, so build the map here and pin every uncovered tensor to GPU 0.
+    n = torch.cuda.device_count() if DEVICE == 'cuda' else 0
+    if n < 2:
+        return DEVICE
+    from accelerate import init_empty_weights, infer_auto_device_map
+    cfg = cls.config_class.from_pretrained(MODEL_PATH)
+    with init_empty_weights():
+        meta = cls._from_config(cfg, torch_dtype=_dtype())
+    gib = os.environ.get('VV_GPU_GIB', '12')
+    dmap = infer_auto_device_map(
+        meta, max_memory={i: f'{gib}GiB' for i in range(n)},
+        no_split_module_classes=_no_split(meta), dtype=_dtype())
+    names = [k for k, _ in meta.named_parameters()] + [k for k, _ in meta.named_buffers()]
+    for name in names:
+        if not any(k == '' or name == k or name.startswith(k + '.') for k in dmap):
+            dmap[name] = 0
+            print(f'pinned {name} to GPU 0')
+    print(f'device map: {len(dmap)} entries over {n} GPUs')
+    return dmap
 
 
 def loaded():
@@ -56,7 +82,7 @@ def get_model():
         except Exception:
             pass
         model = VibeVoiceForConditionalGenerationInference.from_pretrained(
-            MODEL_PATH, torch_dtype=_dtype(), device_map=_device_map(), attn_implementation=attn)
+            MODEL_PATH, torch_dtype=_dtype(), device_map=_device_map(VibeVoiceForConditionalGenerationInference), attn_implementation=attn)
         model.eval()
         model.set_ddpm_inference_steps(num_steps=DDPM_STEPS)
         _state.update(model=model, proc=proc)
