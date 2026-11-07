@@ -1,0 +1,103 @@
+'''VibeVoice engine: one continuous take per script, cloned from a reference clip.'''
+import os
+import re
+import threading
+
+import torch
+
+MODEL_PATH = os.environ.get('VV_MODEL', 'vibevoice/VibeVoice-1.5B')
+CFG_SCALE = float(os.environ.get('VV_CFG', '1.3'))
+DDPM_STEPS = int(os.environ.get('VV_STEPS', '10'))
+# A script up to this many characters is generated in ONE pass (no seams).
+# Longer scripts are split at sentence ends so memory stays bounded.
+MAX_PASS_CHARS = int(os.environ.get('VV_MAX_CHARS', '20000'))
+VO_MARKER = '{here complete voice over}'
+SAMPLE_RATE = 24000
+DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+_state = {}
+lock = threading.Lock()
+
+
+def _dtype():
+    forced = os.environ.get('VV_DTYPE')
+    if forced:
+        return getattr(torch, forced)
+    if DEVICE == 'cuda':
+        # bf16 needs compute capability 8.0+; T4/P100 run fp16 instead.
+        return torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+    return torch.float32
+
+
+def loaded():
+    return 'model' in _state
+
+
+def get_model():
+    if 'model' not in _state:
+        from vibevoice.modular.modeling_vibevoice_inference import VibeVoiceForConditionalGenerationInference
+        from vibevoice.processor.vibevoice_processor import VibeVoiceProcessor
+        print(f'Loading {MODEL_PATH} ...')
+        proc = VibeVoiceProcessor.from_pretrained(MODEL_PATH)
+        attn = 'sdpa'
+        try:
+            import flash_attn  # noqa: F401
+            attn = 'flash_attention_2'
+        except Exception:
+            pass
+        model = VibeVoiceForConditionalGenerationInference.from_pretrained(
+            MODEL_PATH, torch_dtype=_dtype(), device_map=DEVICE, attn_implementation=attn)
+        model.eval()
+        model.set_ddpm_inference_steps(num_steps=DDPM_STEPS)
+        _state.update(model=model, proc=proc)
+        print(f'model ready (attn={attn}, dtype={_dtype()})')
+    return _state['model'], _state['proc']
+
+
+def extract_vo(text):
+    if VO_MARKER not in text:
+        return text.strip()
+    return ' '.join(p.strip() for p in text.split(VO_MARKER)[1:] if p.strip())
+
+
+def prepare(text):
+    text = text.replace(chr(0x2019), chr(39)).replace(chr(0x201c), chr(34)).replace(chr(0x201d), chr(34))
+    return ' '.join(text.split())
+
+
+def split_passes(text, limit=MAX_PASS_CHARS):
+    # prepare() leaves single spaces only, so a space after . ! ? ends a sentence.
+    if len(text) <= limit:
+        return [text]
+    out, cur = [], ''
+    for s in re.split(r'(?<=[.!?]) ', text):
+        if cur and len(cur) + len(s) + 1 > limit:
+            out.append(cur)
+            cur = s
+        else:
+            cur = f'{cur} {s}'.strip()
+    return out + ([cur] if cur else [])
+
+
+def run_pass(model, proc, text, ref_path):
+    inputs = proc(text=[f'Speaker 1: {text}'], voice_samples=[[ref_path]],
+                  padding=True, return_tensors='pt', return_attention_mask=True)
+    for k, v in inputs.items():
+        if torch.is_tensor(v):
+            inputs[k] = v.to(DEVICE)
+    out = model.generate(**inputs, max_new_tokens=None, cfg_scale=CFG_SCALE,
+                         tokenizer=proc.tokenizer, generation_config={'do_sample': False},
+                         verbose=True, is_prefill=True)
+    return out.speech_outputs[0]
+
+
+def synthesize(text, ref_path, out_path, job_id):
+    model, proc = get_model()
+    passes = split_passes(prepare(extract_vo(text)))
+    parts = []
+    for i, p in enumerate(passes):
+        print(f'[{job_id}] pass {i + 1}/{len(passes)} ({len(p)} chars)')
+        parts.append(run_pass(model, proc, p, ref_path))
+    audio = parts[0] if len(parts) == 1 else torch.cat(parts, dim=-1)
+    proc.save_audio(audio, output_path=out_path)
+    return audio.shape[-1] / SAMPLE_RATE
