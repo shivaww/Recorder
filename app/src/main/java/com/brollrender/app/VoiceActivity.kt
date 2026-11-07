@@ -61,6 +61,12 @@ class VoiceActivity : Activity() {
             "!rm -rf /kaggle/working/V && git clone --depth 1 " +
                 "https://github.com/shivaww/Recorder.git /kaggle/working/V && " +
                 "cd /kaggle/working/V/breeze2tts && bash run.sh"
+
+        /** Third engine: VibeVoice, one continuous take with no chunk seams (clone only). */
+        const val VIBEVOICE_BOOTSTRAP_CMD =
+            "!rm -rf /kaggle/working/V && git clone --depth 1 " +
+                "https://github.com/shivaww/Recorder.git /kaggle/working/V && " +
+                "cd /kaggle/working/V/vibevoice && bash run.sh"
     }
 
     private lateinit var securePrefs: SecurePrefs
@@ -379,6 +385,14 @@ class VoiceActivity : Activity() {
             BREEZE_BOOTSTRAP_CMD,
             "breeze-bootstrap",
             "License: Breeze2 model weights are research / non-commercial use; code is Apache-2.0.")
+        col.addView(spacer(dp(14)))
+        buildEngineCard(
+            col,
+            "Start the voice server — VibeVoice (Kaggle)",
+            "Long voiceovers in one continuous take. Use a FRESH GPU notebook (not the one running Qwen3-TTS), paste this, run it, then copy the BASE URL into Connection. Clone mode only: record a clean reference clip of your voice.",
+            VIBEVOICE_BOOTSTRAP_CMD,
+            "vibevoice-bootstrap",
+            "Research-oriented release: test before commercial use. Code comes from a community fork.")
     }
 
     private fun buildEngineCard(
