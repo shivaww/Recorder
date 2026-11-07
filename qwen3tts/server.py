@@ -75,7 +75,7 @@ else:
 os.makedirs(OUT_DIR, exist_ok=True)
 
 VO_MARKER = "{here complete voice over}"
-MAX_CHUNK_CHARS = int(os.environ.get("QWEN_CHUNK_CHARS", "4000"))
+MAX_CHUNK_CHARS = int(os.environ.get("QWEN_CHUNK_CHARS", "32000"))
 # Longest reference clip accepted for cloning, in seconds. Clips are never
 # truncated: ref_text must stay a transcript of the whole clip.
 MAX_REF_SECONDS = 30
