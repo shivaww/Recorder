@@ -75,21 +75,22 @@ else:
 os.makedirs(OUT_DIR, exist_ok=True)
 
 VO_MARKER = "{here complete voice over}"
-MAX_CHUNK_CHARS = 500
+MAX_CHUNK_CHARS = 1000
 # Longest reference clip accepted for cloning, in seconds. Clips are never
 # truncated: ref_text must stay a transcript of the whole clip.
 MAX_REF_SECONDS = 30
 # Sampling preset for x-vector cloning: balanced prosody without instability.
 # Temperature is variation, not an emotion slider; emotion comes from text.
-GEN_KWARGS = {"max_new_tokens": 2048, "temperature": 0.85, "top_p": 0.95,
-              "top_k": 50, "repetition_penalty": 1.05}
-# Escape hatch for upstream issue #341 (ICL speaks the reference tail):
-# x-vector-only cloning has no reference-text conditioning to leak from.
-# Flip to True if the per-chunk trim net ever proves insufficient.
-# FIX FOR UPSTREAM #341: Use x-vector only to prevent reference-tail leakage.
-# This mode ignores ref_text conditioning, stopping "Easy to follow" leaks.
-CLONE_X_VECTOR = True
-# DEBUG_DISABLE_LEAK_TRIM is now irrelevant as leak source is blocked upstream.
+GEN_KWARGS = {"max_new_tokens": 2048, "temperature": 0.6, "top_p": 0.95,
+              "top_k": 30, "repetition_penalty": 1.05}
+# Clone conditioning mode.
+# False = full ICL cloning: the model copies the reference's pace and tone,
+# which keeps delivery steadier across chunks. Known side effect (upstream
+# issue #341): a chunk can open by speaking the reference transcript's tail,
+# so synthesize() runs trim_ref_leak() on every cloned chunk.
+# True = x-vector only: timbre only, no leak path, but delivery varies per
+# chunk. Flip back to True if trim_ref_leak ever eats real first words.
+CLONE_X_VECTOR = False
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # bf16 needs compute capability 8.0+. T4 and P100 lack it, and fp16 is unstable
 # for Qwen3-TTS, so those GPUs run fp32.
@@ -656,11 +657,11 @@ def _synthesize_impl(mode, text, language, speaker, instruct, ref_audio, ref_tex
             ref_audio, ref_text, design_prompt, speed,
             clone_prompt=clone_prompt
         )
+        # ICL clone chunks can open with the reference tail (#341): cut it.
+        if (mode or "").lower() == "clone" and not CLONE_X_VECTOR:
+            wav = trim_ref_leak(wav, sr, ref_text)
         # Trim the model's own leading/trailing silence so we own the seam.
         wav = _trim_silence(wav, sr)
-        # Leak trim net retired: x-vector-only cloning removes the ICL
-        # reference-text path that leaked (#341), and the trimmer's word
-        # timestamp cuts ate legitimate first words of the target.
         # Short fade kills clicks at trimmed boundaries.
         wav = _edge_fade(wav, sr, fade_ms=25.0)
         pieces.append(wav)
