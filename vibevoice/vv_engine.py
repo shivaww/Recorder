@@ -5,9 +5,12 @@ import threading
 
 import torch
 
-MODEL_PATH = os.environ.get('VV_MODEL', 'vibevoice/VibeVoice-1.5B')
+import pronounce
+import text_norm
+
+MODEL_PATH = os.environ.get('VV_MODEL', 'vibevoice/VibeVoice-7B')
 CFG_SCALE = float(os.environ.get('VV_CFG', '1.3'))
-DDPM_STEPS = int(os.environ.get('VV_STEPS', '10'))
+DDPM_STEPS = int(os.environ.get('VV_STEPS', '20'))
 # A script up to this many characters is generated in ONE pass (no seams).
 # Longer scripts are split at sentence ends so memory stays bounded.
 MAX_PASS_CHARS = int(os.environ.get('VV_MAX_CHARS', '20000'))
@@ -29,6 +32,13 @@ def _dtype():
     return torch.float32
 
 
+def _device_map():
+    # The 7B model does not fit one T4: shard its layers across every GPU.
+    if DEVICE == 'cuda' and torch.cuda.device_count() > 1:
+        return 'auto'
+    return DEVICE
+
+
 def loaded():
     return 'model' in _state
 
@@ -46,7 +56,7 @@ def get_model():
         except Exception:
             pass
         model = VibeVoiceForConditionalGenerationInference.from_pretrained(
-            MODEL_PATH, torch_dtype=_dtype(), device_map=DEVICE, attn_implementation=attn)
+            MODEL_PATH, torch_dtype=_dtype(), device_map=_device_map(), attn_implementation=attn)
         model.eval()
         model.set_ddpm_inference_steps(num_steps=DDPM_STEPS)
         _state.update(model=model, proc=proc)
@@ -61,8 +71,8 @@ def extract_vo(text):
 
 
 def prepare(text):
-    text = text.replace(chr(0x2019), chr(39)).replace(chr(0x201c), chr(34)).replace(chr(0x201d), chr(34))
-    return ' '.join(text.split())
+    # Respell tricky words first, then expand numbers/abbreviations like the Qwen server.
+    return text_norm.normalize_text(pronounce.apply(text))
 
 
 def split_passes(text, limit=MAX_PASS_CHARS):
