@@ -52,10 +52,22 @@ def _device_map(cls):
     cfg = cls.config_class.from_pretrained(MODEL_PATH)
     with init_empty_weights():
         meta = cls._from_config(cfg, torch_dtype=_dtype())
-    gib = os.environ.get('VV_GPU_GIB', '12')
+    gib = float(os.environ.get('VV_GPU_GIB', '12'))
+    # The fork mixes embeddings, tokenizer, connector and diffusion-head tensors
+    # with no device moves, so all of those stay on GPU 0. Only LM layers split.
+    def is_lm(name):
+        return name == 'lm_head' or name.startswith('model.language_model')
+    other = sum(p.numel() * p.element_size() for k, p in meta.named_parameters() if not is_lm(k))
+    other_gib = other / 2 ** 30
+    caps = {i: f'{gib}GiB' for i in range(n)}
+    caps[0] = f'{max(1.0, gib - other_gib - 1.0):.2f}GiB'
+    print(f'non-LM params {other_gib:.2f} GiB pinned to GPU 0, GPU 0 LM cap {caps[0]}')
     dmap = infer_auto_device_map(
-        meta, max_memory={i: f'{gib}GiB' for i in range(n)},
+        meta, max_memory=caps,
         no_split_module_classes=_no_split(meta), dtype=_dtype())
+    for k in list(dmap):
+        if k != '' and not is_lm(k):
+            dmap[k] = 0
     names = [k for k, _ in meta.named_parameters()] + [k for k, _ in meta.named_buffers()]
     for name in names:
         if not any(k == '' or name == k or name.startswith(k + '.') for k in dmap):
