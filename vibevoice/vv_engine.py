@@ -68,6 +68,11 @@ def _device_map(cls):
     for k in list(dmap):
         if k != '' and not is_lm(k):
             dmap[k] = 0
+    emb = 'model.language_model.embed_tokens'
+    if emb in dmap:
+        dmap[emb] = 0
+    else:
+        print(f'WARNING: {emb} not a separate map key, embedding placement unverified')
     names = [k for k, _ in meta.named_parameters()] + [k for k, _ in meta.named_buffers()]
     for name in names:
         if not any(k == '' or name == k or name.startswith(k + '.') for k in dmap):
@@ -109,6 +114,9 @@ def get_model():
             MODEL_PATH, torch_dtype=_dtype(), device_map=_device_map(VibeVoiceForConditionalGenerationInference), attn_implementation=attn)
         model.eval()
         _align_speech(model)
+        print('placement: embed', model.model.get_input_embeddings().weight.device,
+              '| connector', next(model.model.acoustic_connector.parameters()).device,
+              '| lm_head', model.lm_head.weight.device)
         model.set_ddpm_inference_steps(num_steps=DDPM_STEPS)
         _state.update(model=model, proc=proc)
         print(f'model ready (attn={attn}, dtype={_dtype()})')
