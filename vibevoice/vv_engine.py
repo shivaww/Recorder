@@ -65,6 +65,18 @@ def _device_map(cls):
     return dmap
 
 
+def _align_speech(model):
+    # forward() writes speech embeds into the text embeds, which live on the
+    # embedding GPU. The connectors can sit on another GPU, so move outputs over.
+    orig = model._process_speech_inputs
+
+    def wrapped(*a, **k):
+        dev = model.model.get_input_embeddings().weight.device
+        return tuple(t.to(dev) if torch.is_tensor(t) else t for t in orig(*a, **k))
+
+    model._process_speech_inputs = wrapped
+
+
 def loaded():
     return 'model' in _state
 
@@ -84,6 +96,7 @@ def get_model():
         model = VibeVoiceForConditionalGenerationInference.from_pretrained(
             MODEL_PATH, torch_dtype=_dtype(), device_map=_device_map(VibeVoiceForConditionalGenerationInference), attn_implementation=attn)
         model.eval()
+        _align_speech(model)
         model.set_ddpm_inference_steps(num_steps=DDPM_STEPS)
         _state.update(model=model, proc=proc)
         print(f'model ready (attn={attn}, dtype={_dtype()})')
