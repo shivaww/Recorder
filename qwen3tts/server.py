@@ -75,13 +75,13 @@ else:
 os.makedirs(OUT_DIR, exist_ok=True)
 
 VO_MARKER = "{here complete voice over}"
-MAX_CHUNK_CHARS = int(os.environ.get("QWEN_CHUNK_CHARS", "2500"))
+MAX_CHUNK_CHARS = int(os.environ.get("QWEN_CHUNK_CHARS", "20000"))
 # Longest reference clip accepted for cloning, in seconds. Clips are never
 # truncated: ref_text must stay a transcript of the whole clip.
 MAX_REF_SECONDS = 30
 # Sampling preset for x-vector cloning: balanced prosody without instability.
 # Temperature is variation, not an emotion slider; emotion comes from text.
-GEN_KWARGS = {"max_new_tokens": int(os.environ.get("QWEN_MAX_TOKENS", "4096")), "temperature": float(os.environ.get("QWEN_TEMP", "0.85")), "top_p": 0.95,
+GEN_KWARGS = {"max_new_tokens": int(os.environ.get("QWEN_MAX_TOKENS", "20000")), "temperature": float(os.environ.get("QWEN_TEMP", "0.85")), "top_p": 0.95,
               "top_k": int(os.environ.get("QWEN_TOP_K", "50")), "repetition_penalty": 1.05}
 # Escape hatch for upstream issue #341 (ICL speaks the reference tail):
 # x-vector-only cloning has no reference-text conditioning to leak from.

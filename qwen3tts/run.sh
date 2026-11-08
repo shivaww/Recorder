@@ -65,8 +65,15 @@ note "port $PORT free"
 
 step "STEP 3/5: Downloading cloudflared"
 if [ ! -x "$CF_PATH" ]; then
-  wget -q "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64" -O "$CF_PATH" \
-    || { echo "  FATAL: cloudflared download failed."; exit 1; }
+  CF_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
+  cf_ok=0
+  for _ in 1 2 3 4 5; do
+    rm -f "$CF_PATH"
+    wget -q --tries=2 --timeout=30 "$CF_URL" -O "$CF_PATH" && cf_ok=1 && break
+    curl -fsSL --retry 2 --max-time 60 "$CF_URL" -o "$CF_PATH" && cf_ok=1 && break
+    sleep 3
+  done
+  [ "$cf_ok" = 1 ] || { echo "  FATAL: cloudflared download failed after retries - re-run the cell."; exit 1; }
 fi
 chmod +x "$CF_PATH"
 note "cloudflared ready"
