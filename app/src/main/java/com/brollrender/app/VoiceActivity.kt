@@ -48,7 +48,7 @@ class VoiceActivity : Activity() {
 
         /** The paragraph the user reads aloud for voice cloning. Sent to the
          *  server as the reference transcript — always English. */
-        val CLONE_SCRIPT = "Hello, and welcome. I\u2019m here to help you turn your ideas into clear, natural, and confident conversations. Whether you\u2019re exploring something exciting or explaining a complex thought, I\u2019ll keep my voice warm, steady, and easy to follow."
+        val CLONE_SCRIPT = "Today I want to explain one idea in plain words. Think of a library with a thousand shelves. Each book holds a small piece of the answer, and the trick is knowing which one to open first. That is how I like to explain things: calm, clear, and steady."
 
         /** One command that boots the voice server on a Kaggle GPU notebook. */
         const val BOOTSTRAP_CMD =
