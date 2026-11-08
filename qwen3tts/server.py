@@ -75,20 +75,20 @@ else:
 os.makedirs(OUT_DIR, exist_ok=True)
 
 VO_MARKER = "{here complete voice over}"
-MAX_CHUNK_CHARS = int(os.environ.get("QWEN_CHUNK_CHARS", "32000"))
+MAX_CHUNK_CHARS = int(os.environ.get("QWEN_CHUNK_CHARS", "2500"))
 # Longest reference clip accepted for cloning, in seconds. Clips are never
 # truncated: ref_text must stay a transcript of the whole clip.
 MAX_REF_SECONDS = 30
 # Sampling preset for x-vector cloning: balanced prosody without instability.
 # Temperature is variation, not an emotion slider; emotion comes from text.
-GEN_KWARGS = {"max_new_tokens": int(os.environ.get("QWEN_MAX_TOKENS", "32000")), "temperature": 0.85, "top_p": 0.95,
-              "top_k": 50, "repetition_penalty": 1.05}
+GEN_KWARGS = {"max_new_tokens": int(os.environ.get("QWEN_MAX_TOKENS", "4096")), "temperature": float(os.environ.get("QWEN_TEMP", "0.85")), "top_p": 0.95,
+              "top_k": int(os.environ.get("QWEN_TOP_K", "50")), "repetition_penalty": 1.05}
 # Escape hatch for upstream issue #341 (ICL speaks the reference tail):
 # x-vector-only cloning has no reference-text conditioning to leak from.
 # Flip to True if the per-chunk trim net ever proves insufficient.
 # FIX FOR UPSTREAM #341: Use x-vector only to prevent reference-tail leakage.
 # This mode ignores ref_text conditioning, stopping "Easy to follow" leaks.
-CLONE_X_VECTOR = True
+CLONE_X_VECTOR = os.environ.get("QWEN_CLONE_MODE", "xvec").lower() != "icl"
 # DEBUG_DISABLE_LEAK_TRIM is now irrelevant as leak source is blocked upstream.
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # bf16 needs compute capability 8.0+. T4 and P100 lack it, and fp16 is unstable
